@@ -1,5 +1,39 @@
 # Gridloom — 변경 기록
 
+## v0.7.2 (2026-05-19)
+
+### 데이터 가공
+- **결측치 채우기** — `fill_na`, `qt_fill_na_dialog` (평균·중앙값·최빈값·ffill/bfill·직접입력)
+- **열 가로 병합** — `merge_columns`, Ctrl+다중 열 선택 → 우클릭, 구분자·원본 삭제 옵션
+- **열 분리** — `split_column`, 구분자 기준 값 나누기 (`\t` 탭 지원)
+- **조인·세로 병합 미리보기** — `QtMergeDialog`, `QtConcatDialog` (VLOOKUP과 동일 레이아웃)
+
+### VLOOKUP
+- 동일 키 열 이름 시 값 유실 버그 수정 (`map` 기반 `vlookup`)
+
+### 검색·필터
+- **[검색] 버튼** — 입력 즉시 필터 제거, 버튼/Enter로 적용
+- **필터 중 Delete** — 열 전체 선택 시 검색에 걸린 행만 내용 지우기
+- **필터 중 편집** — 조건에서 벗어난 행도 [검색] 다시 누르기 전까지 목록 유지
+
+### 표·헤더
+- **조인 후 새 열 리사이즈** — `replace_dataframe` 구조 판정 수정, `refresh_column_headers`
+- **열 헤더 클릭** — 드래그/리사이즈와 클릭 분리, Ctrl+클릭 다중 열 선택 안정화
+- **다중 열 선택** — `SelectionController.select_columns`, `columns` 모드
+
+### 정보 패널
+- 컬럼명·결측·고유값 **읽기 전용** (타입 열 더블클릭만 타입 변경)
+- 결측치 숫자 클릭 → 결측치 채우기 다이얼로그
+
+### UI
+- 표 상단 **결측 채우기** 버튼
+- `help_content.py` 사용법 갱신
+
+### 테스트
+- `qa_operations_smoke.py` — `fill_na`, `merge_columns`, `split_column`, VLOOKUP 동일키 열
+
+---
+
 ## v0.7.1 (2026-05-19)
 
 ### PyQt 데이터 다이얼로그

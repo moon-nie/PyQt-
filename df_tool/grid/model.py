@@ -206,9 +206,30 @@ class GridModel(QAbstractTableModel):
 
     def replace_dataframe(self, df: pd.DataFrame) -> None:
         """뷰어가 소스 DataFrame을 교체한 뒤 모델 표시만 동기화."""
+        old_df = self._df
+        old_cols = list(self._columns)
+        old_row_count = len(old_df.index) if old_df is not None else -1
+        old_col_count = len(old_df.columns) if old_df is not None else -1
         self._df = df
         rows, cols = len(df), len(df.columns)
         self._heavy = is_heavy_dataframe(rows, cols)
+        new_cols = list(self._df.columns)
+        self._use_col_window = cols > COLUMN_WINDOW_THRESHOLD
+        if not self._use_col_window:
+            self._col_offset = 0
+        # 표시 행 수(필터)와 전체 행 수를 비교하면 셀 편집마다 구조 변경으로 오인됨
+        structure_changed = (
+            cols != old_col_count
+            or new_cols != old_cols
+            or rows != old_row_count
+        )
+        if structure_changed:
+            self.beginResetModel()
+            self._rebuild_row_map()
+            self._rebuild_col_map()
+            self.endResetModel()
+            self.dataframe_changed.emit()
+            return
         if self.rowCount() > 0 and self.columnCount() > 0:
             top_left = self.index(0, 0)
             bottom_right = self.index(self.rowCount() - 1, self.columnCount() - 1)

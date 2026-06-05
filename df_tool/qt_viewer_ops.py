@@ -9,7 +9,9 @@ from df_tool.qt_dialogs import (
     qt_confirm,
     qt_duplicate_column_dialog,
     qt_insert_row_dialog,
+    qt_merge_columns_dialog,
     qt_rename_column_dialog,
+    qt_split_column_dialog,
     qt_sequential_fill_dialog,
 )
 
@@ -82,6 +84,54 @@ def duplicate_column_with_dialog(
     if not result:
         return None
     return duplicate_column(df, column, result)
+
+
+def merge_columns_with_dialog(
+    df: pd.DataFrame,
+    columns: list[str],
+    *,
+    parent: QWidget | None = None,
+) -> pd.DataFrame | None:
+    from df_tool.operations import merge_columns
+
+    result = qt_merge_columns_dialog(parent, [str(c) for c in columns])
+    if not result:
+        return None
+    new_name, separator, drop_sources = result
+    try:
+        return merge_columns(
+            df,
+            columns,
+            new_name,
+            separator=separator,
+            drop_sources=drop_sources,
+        )
+    except ValueError as exc:
+        raise ValueError(str(exc)) from exc
+
+
+def split_column_with_dialog(
+    df: pd.DataFrame,
+    column,
+    *,
+    parent: QWidget | None = None,
+) -> pd.DataFrame | None:
+    from df_tool.operations import parse_separator, split_column
+
+    result = qt_split_column_dialog(parent, str(column))
+    if not result:
+        return None
+    separator, prefix, drop_source = result
+    try:
+        return split_column(
+            df,
+            column,
+            parse_separator(separator),
+            name_prefix=prefix,
+            drop_source=drop_source,
+        )
+    except ValueError as exc:
+        raise ValueError(str(exc)) from exc
 
 
 def fill_column_with_dialog(

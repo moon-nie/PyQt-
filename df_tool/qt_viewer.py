@@ -34,6 +34,8 @@ from df_tool.qt_viewer_ops import (
     duplicate_column_with_dialog,
     fill_column_with_dialog,
     fill_sequential_with_dialog,
+    merge_columns_with_dialog,
+    split_column_with_dialog,
     insert_column_with_dialog,
     insert_row_with_dialog,
     rename_column_with_dialog,
@@ -44,7 +46,6 @@ from df_tool.theme import COLORS
 class DataFrameViewer(QWidget):
     """Tk DataFrameViewer와 동일한 public API를 제공하는 PyQt 위젯."""
 
-    SEARCH_DELAY_MS = 600
 
     def __init__(
         self,
@@ -56,7 +57,8 @@ class DataFrameViewer(QWidget):
         on_action_error: Callable[[str, str], None] | None = None,
         on_drop_duplicates: Callable[[], None] | None = None,
         on_drop_na_rows: Callable[[], None] | None = None,
-        on_add_reference: Callable[[], None] | None = None,
+        on_fill_na: Callable[[], None] | None = None,
+        on_fill_na_column: Callable[[str], None] | None = None,
         on_vlookup: Callable[[], None] | None = None,
         on_merge: Callable[[], None] | None = None,
         on_concat: Callable[[], None] | None = None,
@@ -72,7 +74,8 @@ class DataFrameViewer(QWidget):
         self.on_action_error = on_action_error
         self.on_drop_duplicates = on_drop_duplicates
         self.on_drop_na_rows = on_drop_na_rows
-        self.on_add_reference = on_add_reference
+        self.on_fill_na = on_fill_na
+        self.on_fill_na_column = on_fill_na_column
         self.on_vlookup = on_vlookup
         self.on_merge = on_merge
         self.on_concat = on_concat
@@ -82,6 +85,7 @@ class DataFrameViewer(QWidget):
 
         self._df: pd.DataFrame | None = None
         self._filtered_indices: list[object] = []
+        self._filter_pinned_rows: set[object] = set()
         self._selection = SelectionScope()
         self._active_cell: tuple[object, str] | None = None
         self._sort_column: str | None = None
@@ -90,10 +94,7 @@ class DataFrameViewer(QWidget):
         self._use_col_window = False
         self._restore_callback: Callable[[], None] | None = None
         self._preserve_scroll = False
-        self._search_timer = QTimer(self)
-        self._search_timer.setSingleShot(True)
-        self._search_timer.timeout.connect(self._apply_filter_now)
-
+        self._syncing_column_selection = False
         self._model = GridModel(self)
         self._model.set_commit_handler(self._commit_cell_edit)
         self._selection_ctrl = SelectionController(self._model)
@@ -153,6 +154,9 @@ class DataFrameViewer(QWidget):
         self.search_exclude_cb = QCheckBox("제외")
         search_row.addWidget(self.search_exact_cb)
         search_row.addWidget(self.search_exclude_cb)
+        self.search_btn = QPushButton("검색")
+        self.search_btn.clicked.connect(self._apply_filter_now)
+        search_row.addWidget(self.search_btn)
         reset_btn = QPushButton("보기 초기화")
         reset_btn.clicked.connect(self._reset_view)
         search_row.addWidget(reset_btn)
@@ -164,12 +168,12 @@ class DataFrameViewer(QWidget):
 
         action_row = QHBoxLayout()
         action_row.setSpacing(6)
-        self._add_action_btn(action_row, "+ 참조", self.on_add_reference)
         self._add_action_btn(action_row, "VLOOKUP", self.on_vlookup)
         self._add_action_btn(action_row, "조인", self.on_merge)
         self._add_action_btn(action_row, "병합", self.on_concat)
         action_row.addStretch()
         self._add_action_btn(action_row, "그룹", self.on_group_summary)
+        self._add_action_btn(action_row, "결측 채우기", self.on_fill_na)
         self._add_action_btn(action_row, "결측 제거", self.on_drop_na_rows)
         self._add_action_btn(action_row, "중복 제거", self.on_drop_duplicates)
         self._add_action_btn(action_row, "+ 열", self.on_add_column)
@@ -191,10 +195,6 @@ class DataFrameViewer(QWidget):
         layout.addWidget(self.page_label)
 
     def _bind_events(self) -> None:
-        self.search_entry.textChanged.connect(self._schedule_search)
-        self.search_column_combo.currentTextChanged.connect(self._schedule_search)
-        self.search_exact_cb.toggled.connect(self._schedule_search)
-        self.search_exclude_cb.toggled.connect(self._schedule_search)
         self.preview_text.installEventFilter(self)
 
         sel = self._table.selectionModel()
@@ -202,9 +202,9 @@ class DataFrameViewer(QWidget):
         sel.currentChanged.connect(self._on_current_changed)
         h_header = self._table.horizontalHeader()
         v_header = self._table.verticalHeader()
-        h_header.sectionClicked.connect(self._on_header_clicked)
         h_header.sectionDoubleClicked.connect(self._on_header_double_clicked)
         if isinstance(h_header, GridHorizontalHeader):
+            h_header.column_header_clicked.connect(self._on_column_header_clicked)
             h_header.header_context_menu.connect(self._show_column_header_menu)
             h_header.column_reorder.connect(self._on_column_reorder)
             h_header.drop_indicator_changed.connect(self._on_col_drop_indicator)
@@ -353,7 +353,7 @@ class DataFrameViewer(QWidget):
         return self._df.copy() if self._df is not None else None
 
     def prepare_for_new_dataset(self) -> None:
-        self._search_timer.stop()
+        self._filter_pinned_rows.clear()
         self.search_entry.clear()
         self.search_column_combo.setCurrentText("전체 열")
         self.search_exact_cb.setChecked(False)
@@ -374,6 +374,7 @@ class DataFrameViewer(QWidget):
     ) -> None:
         if new_session:
             self.prepare_for_new_dataset()
+            self._filter_pinned_rows.clear()
             self._selection = SelectionScope()
             self._active_cell = None
         if copy:
@@ -398,6 +399,7 @@ class DataFrameViewer(QWidget):
         self.prepare_for_new_dataset()
         self._df = None
         self._filtered_indices = []
+        self._filter_pinned_rows.clear()
         self._selection = SelectionScope()
         self._active_cell = None
         self._model.set_dataframe(pd.DataFrame())
@@ -467,6 +469,7 @@ class DataFrameViewer(QWidget):
             self._sync_model(reset_sort=False)
         else:
             self._model.replace_dataframe(df)
+            self._table.refresh_column_headers()
         self._notify_change(action=action)
 
     def _index_list(self) -> list:
@@ -485,8 +488,19 @@ class DataFrameViewer(QWidget):
         pos = {c: i for i, c in enumerate(order)}
         return sorted(columns, key=lambda x: pos.get(x, 0))
 
+    def _display_row_indices(self) -> list[object]:
+        """검색 결과 + 필터 중 편집한 행(조건에 안 맞아도 유지)."""
+        indices = list(self._filtered_indices)
+        if self._df is not None and self._filter_pinned_rows:
+            seen = set(indices)
+            for idx in self._filter_pinned_rows:
+                if idx in self._df.index and idx not in seen:
+                    indices.append(idx)
+                    seen.add(idx)
+        return indices
+
     def _sorted_filtered_indices(self) -> list[object]:
-        indices = self._filtered_indices
+        indices = self._display_row_indices()
         if not indices or self._df is None or not self._sort_column:
             return indices
         if self._sort_column not in self._df.columns:
@@ -506,6 +520,7 @@ class DataFrameViewer(QWidget):
         if self._sort_column:
             self._model.set_sort(self._sort_column, self._sort_ascending)
         self._model.set_filtered_indices(self._sorted_filtered_indices())
+        self._table.refresh_column_headers()
 
     def _refresh_search_columns(self) -> None:
         self.search_column_combo.blockSignals(True)
@@ -576,18 +591,32 @@ class DataFrameViewer(QWidget):
         else:
             self._filtered_indices = list(self._df.index[self._build_search_mask(query)])
 
-    def _schedule_search(self) -> None:
-        self._search_timer.start(self.SEARCH_DELAY_MS)
+    def _row_filter_active(self) -> bool:
+        """검색·필터로 일부 행만 표시 중인지."""
+        if self._df is None:
+            return False
+        return len(self._filtered_indices) < len(self._df.index)
+
+    def _cells_for_visible_columns(self, columns: list[str]) -> list[tuple[object, str]]:
+        rows = self._index_list()
+        return [(row, col) for col in columns for row in rows]
 
     def _apply_filter_now(self) -> None:
+        self._filter_pinned_rows.clear()
         self._recompute_filtered_indices()
         self._model.set_filtered_indices(self._sorted_filtered_indices())
         self._update_page_label()
 
+    def _pin_row_under_filter(self, source_index: object) -> None:
+        """검색 조건에서 벗어난 뒤에도 방금 편집한 행을 목록에 남김."""
+        if self._df is None or source_index not in self._df.index:
+            return
+        if self._row_filter_active():
+            self._filter_pinned_rows.add(source_index)
+
     def _reset_view(self) -> None:
         if self._df is None:
             return
-        self._search_timer.stop()
         self.search_entry.clear()
         self.search_column_combo.setCurrentText("전체 열")
         self.search_exact_cb.setChecked(False)
@@ -597,6 +626,7 @@ class DataFrameViewer(QWidget):
         self._col_offset = 0
         self._selection = SelectionScope()
         self._active_cell = None
+        self._filter_pinned_rows.clear()
         self._recompute_filtered_indices()
         self._sync_model(reset_sort=True)
         self._table.clearSelection()
@@ -606,6 +636,8 @@ class DataFrameViewer(QWidget):
             self.on_action("보기 초기화")
 
     def _on_selection_changed(self) -> None:
+        if self._syncing_column_selection:
+            return
         active = self._active_cell
         self._selection = self._selection_ctrl.from_selection_model(
             self._table.selectionModel(),
@@ -616,6 +648,8 @@ class DataFrameViewer(QWidget):
             self.on_selection_change(self._selection)
 
     def _on_current_changed(self, current, _previous) -> None:
+        if self._syncing_column_selection:
+            return
         if not current.isValid() or self._df is None:
             return
         src = self._model.source_index_at(current.row())
@@ -648,6 +682,7 @@ class DataFrameViewer(QWidget):
             self._emit_error("셀 편집", str(exc))
             return
         self._apply_df(new_df)
+        self._pin_row_under_filter(idx)
 
     def _commit_cell_edit(self, source_index: object, column: str, text: str) -> bool:
         if self._df is None:
@@ -660,19 +695,23 @@ class DataFrameViewer(QWidget):
             self._emit_error("셀 편집", str(exc))
             return False
         self._apply_df(new_df)
+        self._pin_row_under_filter(source_index)
         if self._active_cell == (source_index, column):
             self.preview_text.blockSignals(True)
             self.preview_text.setPlainText(text)
             self.preview_text.blockSignals(False)
         return True
 
-    def _on_header_clicked(self, section: int) -> None:
+    def _on_column_header_clicked(self, section: int, modifiers) -> None:
         if self._df is None:
             return
         col_name = self._model.column_name_at(section)
         if col_name is None:
             return
-        self._select_column(col_name)
+        if modifiers & Qt.KeyboardModifier.ControlModifier:
+            self._toggle_column_in_selection(col_name)
+        else:
+            self._select_column(col_name)
 
     def _on_header_double_clicked(self, section: int) -> None:
         if self._df is None:
@@ -698,24 +737,73 @@ class DataFrameViewer(QWidget):
         self._select_row(src)
 
     def _select_column(self, column: str) -> None:
+        self._select_columns([column])
+
+    def _selected_column_names(self) -> list[str]:
+        scope = self._selection_ctrl.from_selection_model(
+            self._table.selectionModel(),
+            active_cell=self._active_cell,
+        )
+        if scope.mode in {"column", "columns"} and scope.columns:
+            return self._sorted_columns(scope.columns)
+        if self._selection.mode in {"column", "columns"} and self._selection.columns:
+            return self._sorted_columns(self._selection.columns)
+        return []
+
+    def _select_columns(self, columns: list[str]) -> None:
         if self._df is None:
+            return
+        ordered = self._sorted_columns(set(columns))
+        if not ordered:
             return
         rows = self._index_list()
         if not rows:
             return
-        top = (rows[0], column)
-        bottom = (rows[-1], column)
-        self._selection_ctrl.select_range(
-            self._table.selectionModel(),
-            top,
-            bottom,
-        )
-        self._selection = SelectionScope(mode="column", columns={column}, anchor_column=column)
-        self._active_cell = top
-        self._update_selection_label()
-        idx = self._model.index(0, self._model.view_col_for_name(column) or 0)
-        if idx.isValid():
-            self._table.set_active_cell(idx.row(), idx.column())
+        sel_model = self._table.selectionModel()
+        self._syncing_column_selection = True
+        sel_model.blockSignals(True)
+        try:
+            self._selection_ctrl.select_columns(
+                sel_model,
+                ordered,
+                clear=True,
+            )
+            mode = "column" if len(ordered) == 1 else "columns"
+            self._selection = SelectionScope(
+                mode=mode,
+                columns=set(ordered),
+                anchor_column=ordered[0],
+            )
+            self._active_cell = (rows[0], ordered[0])
+            self._update_selection_label()
+            view_col = self._model.view_col_for_name(ordered[0]) or 0
+            idx = self._model.index(0, view_col)
+            if idx.isValid():
+                self._table.set_active_cell(idx.row(), idx.column())
+            self._table.setFocus(Qt.FocusReason.OtherFocusReason)
+        finally:
+            sel_model.blockSignals(False)
+            self._syncing_column_selection = False
+
+    def _toggle_column_in_selection(self, column: str) -> None:
+        if self._df is None:
+            return
+        current = self._selected_column_names()
+        if current:
+            cols = set(current)
+            if column in cols:
+                cols.discard(column)
+                if not cols:
+                    self._table.clearSelection()
+                    self._selection = SelectionScope()
+                    self._active_cell = None
+                    self._update_selection_label()
+                    return
+            else:
+                cols.add(column)
+            self._select_columns(list(cols))
+        else:
+            self._select_column(column)
 
     def _select_row(self, source_index: object) -> None:
         cols = self._column_list()
@@ -739,9 +827,13 @@ class DataFrameViewer(QWidget):
         if self._df is None:
             self.page_label.setText("")
             return
-        shown = len(self._filtered_indices)
+        shown = len(self._display_row_indices())
+        matched = len(self._filtered_indices)
         total = len(self._df)
-        parts = [f"{shown:,} / {total:,}행 표시"]
+        if shown != matched and self._row_filter_active():
+            parts = [f"{shown:,}행 표시 (검색 {matched:,} + 편집 {shown - matched:,}) / {total:,}행"]
+        else:
+            parts = [f"{shown:,} / {total:,}행 표시"]
         if self._use_col_window:
             cols = len(self._df.columns)
             end = min(self._col_offset + GridModel.MAX_DATA_COLUMNS, cols)
@@ -771,7 +863,15 @@ class DataFrameViewer(QWidget):
         from df_tool.operations import clear_cells, clear_columns, clear_rows
 
         if self._selection.mode in {"column", "columns"} and self._selection.columns:
-            self._apply_df(clear_columns(self._df, list(self._selection.columns)), action="선택 영역 지우기")
+            cols = list(self._selection.columns)
+            if self._row_filter_active():
+                cells = self._cells_for_visible_columns(cols)
+                self._apply_df(
+                    clear_cells(self._df, cells),
+                    action="검색 결과 행 내용 지우기",
+                )
+            else:
+                self._apply_df(clear_columns(self._df, cols), action="선택 영역 지우기")
         elif self._selection.mode in {"row", "rows"} and self._selection.rows:
             self._apply_df(clear_rows(self._df, list(self._selection.rows)), action="선택 영역 지우기")
         elif self._selection.cells:
@@ -1127,6 +1227,44 @@ class DataFrameViewer(QWidget):
         self._apply_df(new_df, action="열 복제", restructure=True)
         self._refresh_search_columns()
 
+    def _trigger_fill_na_column(self, column: str) -> None:
+        if self.on_fill_na_column:
+            self.on_fill_na_column(column)
+
+    def _split_column(self, column) -> None:
+        if self._df is None:
+            return
+        try:
+            new_df = split_column_with_dialog(self._df, column, parent=self)
+        except ValueError as exc:
+            self._emit_error("열 분리 실패", str(exc))
+            return
+        if new_df is None:
+            return
+        self._apply_df(new_df, action=f"열 '{column}' 분리", restructure=True)
+        self._refresh_search_columns()
+        self._selection = SelectionScope()
+        self._table.clearSelection()
+
+    def _merge_selected_columns(self) -> None:
+        if self._df is None or not self._has_column_selection():
+            return
+        columns = self._sorted_columns(self._selection.columns)
+        if len(columns) < 2:
+            self._emit_error("열 병합", "Ctrl+클릭으로 열을 2개 이상 선택하세요.")
+            return
+        try:
+            new_df = merge_columns_with_dialog(self._df, columns, parent=self)
+        except ValueError as exc:
+            self._emit_error("열 병합 실패", str(exc))
+            return
+        if new_df is None:
+            return
+        self._apply_df(new_df, action=f"열 병합 ({len(columns)}개)", restructure=True)
+        self._refresh_search_columns()
+        self._selection = SelectionScope()
+        self._table.clearSelection()
+
     def _fill_column(self, column, method: str) -> None:
         try:
             new_df = fill_column_with_dialog(self._df, column, method, parent=self)
@@ -1261,6 +1399,12 @@ class DataFrameViewer(QWidget):
         menu.addAction("▼ 내림차순 정렬", lambda: self.sort_by(column, False))
         menu.addSeparator()
         menu.addAction("열 전체 선택", lambda: self._select_column(column))
+        if self._has_column_selection() and len(self._selection.columns) >= 2:
+            n_merge = len(self._selection.columns)
+            menu.addAction(
+                f"선택 열 {n_merge}개 병합…",
+                lambda: self._defer_action(self._merge_selected_columns),
+            )
         menu.addAction(
             "열 이름 변경…",
             lambda: self._defer_action(self._rename_column, column),
@@ -1268,6 +1412,10 @@ class DataFrameViewer(QWidget):
         menu.addAction(
             "열 복제",
             lambda: self._defer_action(self._duplicate_column, column),
+        )
+        menu.addAction(
+            "열 분리…",
+            lambda: self._defer_action(self._split_column, column),
         )
         menu.addSeparator()
         menu.addAction(
@@ -1279,6 +1427,15 @@ class DataFrameViewer(QWidget):
             lambda: self._defer_action(self._insert_column, column, "right"),
         )
         menu.addSeparator()
+        from df_tool.operations import count_nulls, resolve_column_key
+
+        col_key = resolve_column_key(self._df, column)
+        if col_key is not None and count_nulls(self._df[col_key]) > 0 and self.on_fill_na_column:
+            menu.addAction(
+                "결측치 채우기…",
+                lambda: self._defer_action(self._trigger_fill_na_column, column),
+            )
+            menu.addSeparator()
         menu.addAction(
             "위로 채우기 (빈칸)",
             lambda: self._defer_action(self._fill_column, column, "ffill"),

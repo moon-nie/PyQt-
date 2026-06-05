@@ -256,6 +256,118 @@ def sort_dataframe(df: pd.DataFrame, column: str, ascending: bool = True) -> pd.
     return df.sort_values(by=key, ascending=ascending, kind="stable")
 
 
+def merge_columns(
+    df: pd.DataFrame,
+    columns: list[str],
+    new_name: str,
+    *,
+    separator: str = "",
+    drop_sources: bool = True,
+) -> pd.DataFrame:
+    """선택한 열의 값을 구분자로 이어 붙여 새 열을 만듭니다."""
+    if len(columns) < 2:
+        raise ValueError("병합하려면 열을 2개 이상 선택하세요.")
+    keys: list = []
+    seen: set = set()
+    for column in columns:
+        key = resolve_column_key(df, column)
+        if key is not None and key not in seen:
+            keys.append(key)
+            seen.add(key)
+    if len(keys) < 2:
+        raise ValueError("병합할 유효한 열이 2개 이상 필요합니다.")
+
+    name = new_name.strip()
+    if not name:
+        raise ValueError("결과 열 이름을 입력하세요.")
+
+    ordered_keys = [key for key in df.columns if key in seen]
+    result = df.copy()
+    merged: list[str] = []
+    for idx in result.index:
+        parts: list[str] = []
+        for key in ordered_keys:
+            value = result.at[idx, key]
+            if is_null_value(value):
+                parts.append("")
+            else:
+                parts.append(str(value))
+        merged.append(separator.join(parts))
+
+    insert_at = int(result.columns.get_loc(ordered_keys[0]))
+    if name in result.columns and name not in ordered_keys:
+        raise ValueError(f"열 이름 '{name}'이(가) 이미 존재합니다.")
+    result.insert(insert_at, name, merged)
+    if drop_sources:
+        drop_cols = [key for key in ordered_keys if key in result.columns]
+        if drop_cols:
+            result = result.drop(columns=drop_cols)
+    return result
+
+
+def parse_separator(text: str) -> str:
+    """다이얼로그 구분자 입력 → 실제 분리 문자."""
+    raw = text
+    if raw == r"\t":
+        return "\t"
+    if raw == r"\n":
+        return "\n"
+    return raw
+
+
+def split_column(
+    df: pd.DataFrame,
+    column: str,
+    separator: str,
+    *,
+    name_prefix: str | None = None,
+    drop_source: bool = False,
+) -> pd.DataFrame:
+    """열 값을 구분자 기준으로 나눠 여러 열로 만듭니다."""
+    key = resolve_column_key(df, column)
+    if key is None:
+        raise ValueError(f"열 '{column}'이(가) 없습니다.")
+    if separator == "":
+        raise ValueError("구분자를 입력하세요.")
+
+    prefix = (name_prefix or str(key)).strip()
+    if not prefix:
+        raise ValueError("새 열 이름 접두사를 입력하세요.")
+
+    result = df.copy()
+    parts_per_row: list[list[str]] = []
+    max_parts = 0
+    for idx in result.index:
+        value = result.at[idx, key]
+        if is_null_value(value):
+            parts: list[str] = []
+        else:
+            parts = str(value).split(separator)
+        parts_per_row.append(parts)
+        max_parts = max(max_parts, len(parts))
+
+    if max_parts == 0:
+        max_parts = 1
+
+    insert_at = int(result.columns.get_loc(key))
+    for part_idx in range(max_parts):
+        values = []
+        for parts in parts_per_row:
+            if part_idx < len(parts):
+                text = parts[part_idx]
+                values.append(pd.NA if text == "" else text)
+            else:
+                values.append(pd.NA)
+        col_name = _unique_column_name(result, f"{prefix}_{part_idx + 1}")
+        result.insert(insert_at + part_idx, col_name, values)
+
+    if drop_source:
+        drop_key = resolve_column_key(result, key)
+        if drop_key is not None and drop_key in result.columns:
+            result = result.drop(columns=[drop_key])
+    return result
+
+
 def reorder_columns(df: pd.DataFrame, source_column: str, target_column: str) -> pd.DataFrame:
     """source_column을 target_column 위치로 이동."""
     src_key = resolve_column_key(df, source_column)
@@ -411,6 +523,93 @@ def fill_with_value(df: pd.DataFrame, column: str, value: str) -> pd.DataFrame:
     return result
 
 
+FILL_NA_METHOD_LABELS: dict[str, str] = {
+    "mean": "평균 (mean)",
+    "median": "중앙값 (median)",
+    "mode": "최빈값 (mode)",
+    "min": "최소값 (min)",
+    "max": "최대값 (max)",
+    "ffill": "위 값으로 채우기 (ffill)",
+    "bfill": "아래 값으로 채우기 (bfill)",
+    "constant": "직접 입력",
+}
+
+
+def column_supports_numeric_fill(series: pd.Series) -> bool:
+    return pd.api.types.is_numeric_dtype(series) and not pd.api.types.is_bool_dtype(series)
+
+
+def column_fill_na_methods(series: pd.Series) -> list[str]:
+    """열 dtype에 맞는 결측치 채우기 방식 코드 목록."""
+    methods: list[str] = []
+    if column_supports_numeric_fill(series):
+        methods.extend(["mean", "median", "min", "max"])
+    methods.extend(["mode", "ffill", "bfill", "constant"])
+    return methods
+
+
+def compute_fill_na_scalar(series: pd.Series, method: str, *, constant: str | None = None):
+    """결측치에 넣을 단일 값 계산 (ffill/bfill 제외)."""
+    mask = null_mask(series)
+    valid = series[~mask]
+    if method == "constant":
+        if constant is None or str(constant).strip() == "":
+            raise ValueError("채울 값을 입력하세요.")
+        return _parse_value(constant, series.dtype)
+    if method in ("ffill", "bfill"):
+        raise ValueError("방향 채우기는 compute_fill_na_scalar를 사용하지 마세요.")
+    if len(valid) == 0:
+        raise ValueError("채울 기준 값이 없습니다. (유효한 값이 하나도 없음)")
+    if method == "mean":
+        return valid.mean()
+    if method == "median":
+        return valid.median()
+    if method == "min":
+        return valid.min()
+    if method == "max":
+        return valid.max()
+    if method == "mode":
+        modes = valid.mode()
+        if modes.empty:
+            raise ValueError("최빈값을 계산할 수 없습니다.")
+        return modes.iloc[0]
+    raise ValueError(f"지원하지 않는 채우기 방식: {method}")
+
+
+def fill_na(
+    df: pd.DataFrame,
+    column: str,
+    method: str,
+    *,
+    constant_value: str | None = None,
+) -> pd.DataFrame:
+    """열의 결측치만 지정한 방식으로 채웁니다."""
+    result = df.copy()
+    key = resolve_column_key(result, column)
+    if key is None:
+        raise ValueError(f"열 '{column}'이(가) 없습니다.")
+    series = result[key]
+    mask = null_mask(series)
+    if not mask.any():
+        return result
+
+    if method in ("ffill", "bfill"):
+        filled = series.ffill() if method == "ffill" else series.bfill()
+        result.loc[mask, key] = filled.loc[mask]
+        still_null = null_mask(result[key])
+        if still_null.any() and method == "ffill":
+            filled2 = result[key].bfill()
+            result.loc[still_null, key] = filled2.loc[still_null]
+        elif still_null.any() and method == "bfill":
+            filled2 = result[key].ffill()
+            result.loc[still_null, key] = filled2.loc[still_null]
+        return result
+
+    value = compute_fill_na_scalar(series, method, constant=constant_value)
+    result.loc[mask, key] = value
+    return result
+
+
 def drop_duplicates(df: pd.DataFrame, subset: list[str] | None = None) -> pd.DataFrame:
     return df.drop_duplicates(subset=subset, keep="first")
 
@@ -442,6 +641,29 @@ def merge_dataframes(
     return pd.merge(left, right, how=how, left_on=left_on, right_on=right_on, suffixes=suffixes)
 
 
+def _normalize_lookup_key(value) -> object:
+    """VLOOKUP 키 비교용 — 공백·문자열 변환 (엑셀과 유사)."""
+    if value is None or (isinstance(value, float) and pd.isna(value)):
+        return pd.NA
+    try:
+        if pd.isna(value):
+            return pd.NA
+    except (TypeError, ValueError):
+        pass
+    if isinstance(value, bool):
+        return str(value)
+    if isinstance(value, (int, float)):
+        if float(value) == int(value):
+            return str(int(value))
+        return str(value).strip()
+    text = str(value).strip()
+    return text if text else pd.NA
+
+
+def _lookup_keys(series: pd.Series) -> pd.Series:
+    return series.map(_normalize_lookup_key)
+
+
 def vlookup(
     left: pd.DataFrame,
     right: pd.DataFrame,
@@ -460,24 +682,18 @@ def vlookup(
     if return_col is None:
         raise ValueError(f"참조 파일에 '{return_column}' 열이 없습니다.")
 
+    output_name = str(new_column or return_column).strip()
+    if not output_name:
+        raise ValueError("결과 열 이름을 입력하세요.")
+
+    result = left.copy()
     lookup = right[[right_key_col, return_col]].drop_duplicates(subset=[right_key_col], keep="first")
-    merged = left.merge(
-        lookup,
-        how="left",
-        left_on=left_key_col,
-        right_on=right_key_col,
-    )
+    key_series = _lookup_keys(lookup[right_key_col])
+    value_map = pd.Series(lookup[return_col].values, index=key_series.values)
+    value_map = value_map[~value_map.index.duplicated(keep="first")]
 
-    output_name = new_column or return_column
-    if output_name != return_col:
-        merged[output_name] = merged[return_col]
-        if return_col in merged.columns and return_col != left_key_col:
-            merged = merged.drop(columns=[return_col])
-
-    if right_key_col != left_key_col and right_key_col in merged.columns:
-        merged = merged.drop(columns=[right_key_col])
-
-    return merged
+    result[output_name] = _lookup_keys(result[left_key_col]).map(value_map)
+    return result
 
 
 def vlookup_stats(
@@ -489,12 +705,15 @@ def vlookup_stats(
     new_column: str | None = None,
 ) -> dict[str, int]:
     """VLOOKUP 매칭 통계 (미리보기용)."""
-    output_name = new_column or return_column
-    result = vlookup(left, right, left_key, right_key, return_column, output_name)
-    if output_name not in result.columns:
+    left_key_col = resolve_column_key(left, left_key)
+    right_key_col = resolve_column_key(right, right_key)
+    if left_key_col is None or right_key_col is None:
         return {"total": len(left), "matched": 0, "unmatched": len(left)}
-    matched = int(result[output_name].notna().sum())
-    total = len(result)
+
+    lookup_keys = set(_lookup_keys(right[right_key_col]).dropna().unique())
+    left_keys = _lookup_keys(left[left_key_col])
+    total = len(left)
+    matched = int(left_keys.map(lambda k: k in lookup_keys if pd.notna(k) else False).sum())
     return {"total": total, "matched": matched, "unmatched": total - matched}
 
 

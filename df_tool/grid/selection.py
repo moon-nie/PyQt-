@@ -27,12 +27,22 @@ class SelectionController:
         cols = {idx.column() for idx in indexes}
         scope = SelectionScope()
 
-        if len(rows) == self._model.rowCount() and len(cols) == 1:
-            col_name = self._model.column_name_at(next(iter(cols)))
-            if col_name:
-                scope.mode = "column"
-                scope.columns = {col_name}
-                scope.anchor_column = col_name
+        if len(rows) == self._model.rowCount() and len(cols) >= 1:
+            col_names: set[str] = set()
+            for col_idx in cols:
+                name = self._model.column_name_at(col_idx)
+                if name:
+                    col_names.add(name)
+            if col_names:
+                if len(col_names) == 1:
+                    only = next(iter(col_names))
+                    scope.mode = "column"
+                    scope.columns = {only}
+                    scope.anchor_column = only
+                else:
+                    scope.mode = "columns"
+                    scope.columns = col_names
+                    scope.anchor_column = next(iter(col_names))
                 return scope
 
         if len(cols) == self._model.columnCount() and len(rows) >= 1:
@@ -96,6 +106,40 @@ class SelectionController:
             self._model.index(bottom_row, right_col),
         )
         selection_model.select(selection, QItemSelectionModel.SelectionFlag.ClearAndSelect)
+
+    def select_columns(
+        self,
+        selection_model: QItemSelectionModel,
+        columns: list[str],
+        *,
+        clear: bool = True,
+    ) -> None:
+        """여러 열 전체 선택 (표에 보이는 행 기준)."""
+        if not columns:
+            return
+        rows = list(range(self._model.rowCount()))
+        if not rows:
+            return
+        if clear:
+            selection_model.clearSelection()
+        for col_idx, column in enumerate(columns):
+            view_col = self._model.view_col_for_name(column)
+            if view_col is None:
+                continue
+            top = self._model.index(rows[0], view_col)
+            bottom = self._model.index(rows[-1], view_col)
+            selection = QItemSelection(top, bottom)
+            flag = (
+                QItemSelectionModel.SelectionFlag.ClearAndSelect
+                if clear and col_idx == 0
+                else QItemSelectionModel.SelectionFlag.Select
+            )
+            selection_model.select(selection, flag)
+        first_col = self._model.view_col_for_name(columns[0])
+        if first_col is not None:
+            current = self._model.index(rows[0], first_col)
+            if current.isValid():
+                selection_model.setCurrentIndex(current, QItemSelectionModel.SelectionFlag.NoUpdate)
 
     @staticmethod
     def current_source_cell(selection_model: QItemSelectionModel, model: GridModel) -> tuple[object, str] | None:

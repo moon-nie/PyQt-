@@ -86,6 +86,20 @@ class GridView(QTableView):
         if idx.isValid():
             self.scrollTo(idx, QAbstractItemView.ScrollHint.EnsureVisible)
 
+    def refresh_column_headers(self) -> None:
+        """열 구조 변경 후 새 열 헤더 리사이즈가 동작하도록 재설정."""
+        header = self.horizontalHeader()
+        count = self.model().columnCount() if self.model() is not None else 0
+        default_w = header.defaultSectionSize() or 96
+        for visual in range(count):
+            logical = header.logicalIndex(visual)
+            if logical < 0:
+                continue
+            header.setSectionResizeMode(logical, QHeaderView.ResizeMode.Interactive)
+            if header.sectionSize(logical) < 32:
+                header.resizeSection(logical, default_w)
+        header.viewport().update()
+
     def set_active_cell(self, row: int | None, col: int | None) -> None:
         self._delegate.set_active_cell(row, col)
         self.viewport().update()

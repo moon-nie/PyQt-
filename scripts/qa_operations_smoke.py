@@ -7,9 +7,14 @@ import pandas as pd
 
 from df_tool.operations import (
     clear_cells,
+    count_nulls,
     delete_columns,
     duplicate_column,
+    fill_na,
     find_replace,
+    merge_columns,
+    parse_separator,
+    split_column,
     group_summary,
     insert_column,
     reorder_columns,
@@ -70,6 +75,29 @@ def main() -> int:
     right = pd.DataFrame({"id": [1, 2], "score": [90, 80]})
     merged = vlookup(left, right, "id", "id", "score", "점수")
     assert merged["점수"].tolist() == [90, 80]
+
+    same_key = pd.DataFrame({"상품명": ["사과", "배"], "가격": [1, 2]})
+    ref = pd.DataFrame({"상품명": ["사과", "배"], "재고": [10, 20]})
+    out = vlookup(same_key, ref, "상품명", "상품명", "재고", "재고")
+    assert out["재고"].tolist() == [10, 20]
+
+    # merge_columns
+    mdf = pd.DataFrame({"A": ["서울", "부산"], "B": ["강남", "해운대"]})
+    merged_cols = merge_columns(mdf, ["A", "B"], "주소", separator=" ", drop_sources=True)
+    assert list(merged_cols.columns) == ["주소"]
+    assert merged_cols["주소"].tolist() == ["서울 강남", "부산 해운대"]
+
+    assert parse_separator(r"\t") == "\t"
+    sdf = pd.DataFrame({"addr": ["서울-강남", "부산-해운대", None]})
+    split_df = split_column(sdf, "addr", "-", name_prefix="주소")
+    assert "주소_1" in split_df.columns and "주소_2" in split_df.columns
+    assert split_df["주소_1"].tolist()[0] == "서울"
+
+    # fill_na
+    na_df = pd.DataFrame({"score": [1.0, None, 3.0, None]})
+    filled = fill_na(na_df, "score", "median")
+    assert count_nulls(filled["score"]) == 0
+    assert filled["score"].tolist()[1] == 2.0
 
     # group_summary
     gdf = pd.DataFrame({"g": ["x", "x", "y"], "v": [1, 2, 3]})

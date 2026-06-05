@@ -31,6 +31,8 @@ from df_tool import __version__
 from df_tool.branding import APP_NAME, APP_TAGLINE
 from df_tool.qt_data_dialogs import (
     qt_concat_dialog,
+    qt_fill_na_dialog,
+    qt_fill_na_pick_column_dialog,
     qt_group_summary_dialog,
     qt_merge_dialog,
     qt_vlookup_dialog,
@@ -46,11 +48,13 @@ from df_tool.performance import (
     should_prompt_large_file,
 )
 from df_tool.operations import (
+    FILL_NA_METHOD_LABELS,
     concat_dataframes,
     convert_column_dtype,
     delete_column,
     drop_duplicates,
     drop_na_rows,
+    fill_na,
     find_replace as op_find_replace,
     group_summary,
     insert_column_at_end,
@@ -94,7 +98,6 @@ class MainWindow(QMainWindow):
 
         self._loaded: LoadedData | None = None
         self._undo_stack: list[pd.DataFrame] = []
-        self._reference_files: dict[str, pd.DataFrame] = {}
         self._before_summary_df: pd.DataFrame | None = None
         self._current_page = "main"
         self._updating_sheet_combo = False
@@ -207,7 +210,8 @@ class MainWindow(QMainWindow):
             on_action_error=self._toast_error,
             on_drop_duplicates=self.drop_duplicates,
             on_drop_na_rows=self.drop_na_rows,
-            on_add_reference=self.add_reference_file,
+            on_fill_na=self.fill_missing_values,
+            on_fill_na_column=self.fill_missing_in_column,
             on_vlookup=self.run_vlookup,
             on_merge=self.run_merge,
             on_concat=self.run_concat,
@@ -219,7 +223,10 @@ class MainWindow(QMainWindow):
 
         sidebar = QSplitter(Qt.Orientation.Vertical)
         sidebar.setMinimumWidth(300)
-        self.info_panel = InfoPanel(on_dtype_change=self.change_column_dtype)
+        self.info_panel = InfoPanel(
+            on_dtype_change=self.change_column_dtype,
+            on_fill_na=self.fill_missing_in_column,
+        )
         self.code_panel = CodePanel(
             on_run=self._apply_code_result,
             get_dataframe=lambda: self._loaded.dataframe if self._loaded else None,
@@ -461,7 +468,6 @@ class MainWindow(QMainWindow):
         self.viewer.prepare_for_new_dataset()
         self._undo_stack.clear()
         self._before_summary_df = None
-        self._reference_files.clear()
         self.viewer.set_restore_available(False)
         self._loaded = None
         gc.collect()
@@ -747,6 +753,30 @@ class MainWindow(QMainWindow):
             return
         self._apply_dataframe(df, message=f"중복 {removed:,}행 제거")
 
+    def fill_missing_values(self) -> None:
+        """결측이 있는 열을 고른 뒤 채우기."""
+        if not self._require_data() or self._loaded is None:
+            return
+        column = qt_fill_na_pick_column_dialog(self, self._loaded.dataframe)
+        if column:
+            self.fill_missing_in_column(column)
+
+    def fill_missing_in_column(self, column: str) -> None:
+        if not self._require_data() or self._loaded is None:
+            return
+        df = self._loaded.dataframe
+        result = qt_fill_na_dialog(self, df, column)
+        if not result:
+            return
+        method, constant = result
+        label = FILL_NA_METHOD_LABELS.get(method, method)
+        try:
+            new_df = fill_na(df, column, method, constant_value=constant)
+        except Exception as exc:
+            self._toast_error("결측치 채우기 실패", str(exc))
+            return
+        self._apply_dataframe(new_df, message=f"'{column}' 결측치 채우기 ({label})")
+
     def drop_na_rows(self) -> None:
         if not self._require_data() or self._loaded is None:
             return
@@ -758,34 +788,6 @@ class MainWindow(QMainWindow):
             self._log_action("info", "결측 행 없음", "변경된 데이터가 없습니다.")
             return
         self._apply_dataframe(df, message=f"결측 행 {removed:,}개 제거")
-
-    def add_reference_file(self) -> None:
-        filters = ";;".join(f"{label} ({pat})" for label, pat in FILE_DIALOG_TYPES)
-        path, _ = QFileDialog.getOpenFileName(self, "참조 파일 선택", "", filters)
-        if not path:
-            return
-        try:
-            loaded = load_file(Path(path))
-        except Exception as exc:
-            self._toast_error("참조 파일 열기 실패", str(exc))
-            return
-        name = loaded.path.name
-        if name in self._reference_files:
-            reply = QMessageBox.question(self, "확인", f"'{name}' 참조 파일을 덮어쓸까요?")
-            if reply != QMessageBox.StandardButton.Yes:
-                return
-        self._reference_files[name] = loaded.dataframe
-        self._set_status(f"참조 파일 등록: {name}")
-        self._log_action("success", f"참조 파일 등록: {name}")
-
-    def _lookup_sources(self) -> list[tuple[str, list[str]]]:
-        return [(name, [str(c) for c in df.columns]) for name, df in self._reference_files.items()]
-
-    def _require_reference(self) -> bool:
-        if not self._lookup_sources():
-            self._toast_warning("참조 파일 필요", detail="[데이터 > 참조 파일 추가]를 먼저 사용하세요.")
-            return False
-        return True
 
     def run_vlookup(self) -> None:
         if not self._require_data() or self._loaded is None:
@@ -806,18 +808,18 @@ class MainWindow(QMainWindow):
         self._apply_dataframe(df, message=f"VLOOKUP → '{new_name}' 열 추가")
 
     def run_merge(self) -> None:
-        if not self._require_data() or not self._require_reference() or self._loaded is None:
+        if not self._require_data() or self._loaded is None:
             return
         result = qt_merge_dialog(
             self,
             [str(c) for c in self._loaded.dataframe.columns],
-            self._lookup_sources(),
+            self._loaded.dataframe,
         )
         if not result:
             return
-        source, left_on, right_on, how = result
+        ref_df, left_on, right_on, how = result
         try:
-            df = merge_dataframes(self._loaded.dataframe, self._reference_files[source], left_on, right_on, how=how)
+            df = merge_dataframes(self._loaded.dataframe, ref_df, left_on, right_on, how=how)
         except Exception as exc:
             self._toast_error("조인 실패", str(exc))
             return
@@ -826,15 +828,11 @@ class MainWindow(QMainWindow):
     def run_concat(self) -> None:
         if not self._require_data() or self._loaded is None:
             return
-        result = qt_concat_dialog(self, ["(현재 파일)"] + list(self._reference_files.keys()))
+        result = qt_concat_dialog(self, self._loaded.dataframe)
         if not result:
             return
-        dfs = [
-            self._loaded.dataframe if name == "(현재 파일)" else self._reference_files[name]
-            for name in result
-        ]
         try:
-            df = concat_dataframes(dfs)
+            df = concat_dataframes(result)
         except Exception as exc:
             self._toast_error("병합 실패", str(exc))
             return

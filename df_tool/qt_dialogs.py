@@ -268,6 +268,81 @@ def qt_duplicate_column_dialog(
     return name
 
 
+def qt_merge_columns_dialog(
+    parent: QWidget | None,
+    columns: list[str],
+) -> tuple[str, str, bool] | None:
+    """열 가로 병합 — (결과 열 이름, 구분자, 원본 열 삭제 여부)."""
+    if len(columns) < 2:
+        return None
+    labels = [str(c) for c in columns]
+    default_name = "_".join(labels)
+    dlg = _QtFormDialog(parent, "열 병합", confirm_text="병합", min_width=460)
+    hint = QLabel(
+        f"선택 열 {len(labels)}개: {', '.join(labels)}\n"
+        "각 행의 값을 왼쪽→오른쪽 순서로 이어 붙입니다."
+    )
+    hint.setWordWrap(True)
+    hint.setStyleSheet(f"color: {COLORS['text_secondary']};")
+    dlg._layout.addWidget(hint)
+    dlg._layout.addWidget(QLabel("결과 열 이름:"))
+    name_entry = QLineEdit(default_name)
+    dlg._layout.addWidget(name_entry)
+    dlg._layout.addWidget(QLabel("구분자 (비우면 붙여 쓰기):"))
+    sep_entry = QLineEdit("")
+    sep_entry.setPlaceholderText("예: 공백, -, /, _")
+    dlg._layout.addWidget(sep_entry)
+    drop_cb = QCheckBox("병합 후 원본 열 삭제")
+    drop_cb.setChecked(True)
+    dlg._layout.addWidget(drop_cb)
+    dlg._layout.addWidget(dlg._buttons)
+    if dlg.exec() != QDialog.DialogCode.Accepted:
+        return None
+    name = name_entry.text().strip()
+    if not name:
+        QMessageBox.warning(parent, "입력 오류", "결과 열 이름을 입력하세요.")
+        return None
+    return name, sep_entry.text(), drop_cb.isChecked()
+
+
+def qt_split_column_dialog(
+    parent: QWidget | None,
+    column: str,
+) -> tuple[str, str, bool] | None:
+    """열 분리 — (구분자, 열 이름 접두사, 원본 열 삭제 여부)."""
+    col_label = str(column)
+    dlg = _QtFormDialog(parent, "열 분리", confirm_text="분리", min_width=460)
+    hint = QLabel(
+        f"열 '{col_label}'의 값을 구분자 기준으로 나눕니다.\n"
+        "예: '서울-강남' + 구분자 '-' → '서울', '강남' 두 열"
+    )
+    hint.setWordWrap(True)
+    hint.setStyleSheet(f"color: {COLORS['text_secondary']};")
+    dlg._layout.addWidget(hint)
+    dlg._layout.addWidget(QLabel("구분자:"))
+    sep_entry = QLineEdit(",")
+    sep_entry.setPlaceholderText("예: ,  -  /  공백은 스페이스 한 칸 · 탭은 \\t")
+    dlg._layout.addWidget(sep_entry)
+    dlg._layout.addWidget(QLabel("새 열 이름 접두사:"))
+    prefix_entry = QLineEdit(col_label)
+    dlg._layout.addWidget(prefix_entry)
+    drop_cb = QCheckBox("분리 후 원본 열 삭제")
+    drop_cb.setChecked(False)
+    dlg._layout.addWidget(drop_cb)
+    dlg._layout.addWidget(dlg._buttons)
+    if dlg.exec() != QDialog.DialogCode.Accepted:
+        return None
+    separator = sep_entry.text()
+    if separator == "":
+        QMessageBox.warning(parent, "입력 오류", "구분자를 입력하세요.")
+        return None
+    prefix = prefix_entry.text().strip()
+    if not prefix:
+        QMessageBox.warning(parent, "입력 오류", "새 열 이름 접두사를 입력하세요.")
+        return None
+    return separator, prefix, drop_cb.isChecked()
+
+
 def qt_sequential_fill_dialog(parent: QWidget | None, column: str) -> tuple[int, int] | None:
     dlg = _QtFormDialog(parent, "순차 번호 채우기", confirm_text="채우기", min_width=400)
     msg = QLabel(f"'{column}' 열 전체에 1, 2, 3… 순서로 번호를 채웁니다.")

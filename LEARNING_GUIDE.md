@@ -79,7 +79,7 @@ operations.py                    ← pandas로 실제 데이터 변경
 |------|------|-------|
 | 12 | `df_tool/qt_viewer.py` | `DataFrameViewer` — 메뉴, 단축키, `_apply_df` |
 | 13 | `df_tool/qt_viewer_ops.py` | 행/열 추가·삭제 + PyQt 다이얼로그 |
-| 14 | `df_tool/qt_data_dialogs.py` | VLOOKUP·조인·병합·그룹 PyQt 다이얼로그 |
+| 14 | `df_tool/qt_data_dialogs.py` | VLOOKUP·조인·병합·결측채우기·그룹 PyQt 다이얼로그 |
 
 **연습:** 열 헤더 우클릭 → 「열 삭제」를 눌렀을 때 호출되는 함수 이름을 적어 보세요.
 
@@ -136,7 +136,7 @@ Tk 시절 `viewer.py`와 **같은 public API**를 PyQt로 제공합니다.
 | 방식 | 언제 |
 |------|------|
 | `qt_dialogs.py` | **신규·단순** 팝업 (확인, 입력, 도움말) |
-| `qt_data_dialogs.py` | VLOOKUP, 조인, 병합, 그룹 요약 |
+| `qt_data_dialogs.py` | VLOOKUP, 조인, 병합, 결측채우기, 그룹 요약 |
 
 ---
 

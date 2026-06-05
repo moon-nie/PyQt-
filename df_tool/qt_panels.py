@@ -7,7 +7,7 @@ from typing import Callable
 
 import pandas as pd
 from PyQt6.QtCore import Qt
-from PyQt6.QtGui import QFont, QKeySequence, QShortcut
+from PyQt6.QtGui import QColor, QFont, QKeySequence, QShortcut
 from PyQt6.QtWidgets import (
     QComboBox,
     QFrame,
@@ -48,10 +48,22 @@ def _memory_usage(df: pd.DataFrame, *, detailed: bool) -> str:
     return f"{mem} B"
 
 
+def _readonly_table_item(text: str) -> QTableWidgetItem:
+    item = QTableWidgetItem(text)
+    item.setFlags(item.flags() & ~Qt.ItemFlag.ItemIsEditable)
+    return item
+
+
 class InfoPanel(QWidget):
-    def __init__(self, on_dtype_change: Callable[[str, str], None] | None = None, parent=None) -> None:
+    def __init__(
+        self,
+        on_dtype_change: Callable[[str, str], None] | None = None,
+        on_fill_na: Callable[[str], None] | None = None,
+        parent=None,
+    ) -> None:
         super().__init__(parent)
         self.on_dtype_change = on_dtype_change
+        self.on_fill_na = on_fill_na
         self._df: pd.DataFrame | None = None
         self._path = ""
         self._sheet: str | None = None
@@ -90,7 +102,9 @@ class InfoPanel(QWidget):
         self.table.setHorizontalHeaderLabels(["컬럼", "타입", "결측치", "고유값"])
         self.table.horizontalHeader().setStretchLastSection(True)
         self.table.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
-        self.table.cellDoubleClicked.connect(self._on_dtype_click)
+        self.table.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
+        self.table.cellDoubleClicked.connect(self._on_cell_double_clicked)
+        self.table.cellClicked.connect(self._on_cell_clicked)
         layout.addWidget(self.table, stretch=1)
 
         self.file_label = QLabel("파일을 열면 요약이 표시됩니다")
@@ -161,10 +175,34 @@ class InfoPanel(QWidget):
             else:
                 null_text = "—"
                 unique_text = "—"
-            self.table.setItem(row, 0, QTableWidgetItem(col_str))
-            self.table.setItem(row, 1, QTableWidgetItem(column_dtype_display(df[col])))
-            self.table.setItem(row, 2, QTableWidgetItem(null_text))
-            self.table.setItem(row, 3, QTableWidgetItem(unique_text))
+            self.table.setItem(row, 0, _readonly_table_item(col_str))
+            self.table.setItem(row, 1, _readonly_table_item(column_dtype_display(df[col])))
+            null_item = _readonly_table_item(null_text)
+            if self._detailed_stats and null_text not in ("—", "0"):
+                null_item.setForeground(QColor(COLORS["primary"]))
+                null_item.setToolTip("클릭하여 결측치 채우기")
+            self.table.setItem(row, 2, null_item)
+            self.table.setItem(row, 3, _readonly_table_item(unique_text))
+
+    def _on_cell_clicked(self, row: int, col: int) -> None:
+        if col != 2 or self._df is None or not self.on_fill_na:
+            return
+        column_item = self.table.item(row, 0)
+        if not column_item:
+            return
+        from df_tool.operations import count_nulls, resolve_column_key
+
+        column = column_item.text()
+        key = resolve_column_key(self._df, column)
+        if key is None:
+            return
+        if count_nulls(self._df[key]) <= 0:
+            return
+        self.on_fill_na(column)
+
+    def _on_cell_double_clicked(self, row: int, col: int) -> None:
+        if col == 1:
+            self._on_dtype_click(row, col)
 
     def _on_dtype_click(self, row: int, col: int) -> None:
         if col != 1 or self._df is None or not self.on_dtype_change:

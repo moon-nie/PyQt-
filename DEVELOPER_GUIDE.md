@@ -31,7 +31,7 @@ Gridloom/
     ├── operations.py         ★ pandas SSOT (UI import 금지)
     ├── loader.py             파일 I/O
     ├── selection.py          SelectionScope
-    ├── qt_data_dialogs.py    VLOOKUP·조인·병합·그룹
+    ├── qt_data_dialogs.py    VLOOKUP·조인·병합·결측채우기·그룹
 ```
 
 ### 역할 비유
@@ -42,7 +42,8 @@ Gridloom/
 | `qt_viewer.py` | 테이블 — 표시·선택·우클릭·단축키 |
 | `operations.py` | 주방 — pandas 변환만 |
 | `qt_dialogs.py` | PyQt 공통 팝업 (확인·저장·도움말) |
-| `qt_data_dialogs.py` | VLOOKUP·조인·병합·그룹 팝업 |
+| `qt_data_dialogs.py` | VLOOKUP·조인·병합·결측채우기·그룹 팝업 |
+| `qt_dialogs.py` | 열 병합·분리 등 공통 폼 다이얼로그 |
 | `grid/` | 표 엔진 — Qt 모델·뷰·헤더 |
 
 ---
