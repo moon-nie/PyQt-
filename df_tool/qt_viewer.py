@@ -23,7 +23,7 @@ from PyQt6.QtWidgets import (
 )
 
 from df_tool.grid import GridModel, GridView, SelectionController
-from df_tool.grid.header import GridHorizontalHeader
+from df_tool.grid.header import GridHorizontalHeader, GridVerticalHeader
 from df_tool.grid.format import raw_value
 from df_tool.performance import COLUMN_WINDOW_THRESHOLD, is_heavy_dataframe
 from df_tool.qt_theme import card_frame_style
@@ -95,6 +95,7 @@ class DataFrameViewer(QWidget):
         self._restore_callback: Callable[[], None] | None = None
         self._preserve_scroll = False
         self._syncing_column_selection = False
+        self._syncing_row_selection = False
         self._model = GridModel(self)
         self._model.set_commit_handler(self._commit_cell_edit)
         self._selection_ctrl = SelectionController(self._model)
@@ -208,7 +209,10 @@ class DataFrameViewer(QWidget):
             h_header.header_context_menu.connect(self._show_column_header_menu)
             h_header.column_reorder.connect(self._on_column_reorder)
             h_header.drop_indicator_changed.connect(self._on_col_drop_indicator)
-        v_header.sectionClicked.connect(self._on_row_header_clicked)
+        if isinstance(v_header, GridVerticalHeader):
+            v_header.row_header_clicked.connect(self._on_row_header_clicked)
+        else:
+            v_header.sectionClicked.connect(self._on_row_header_clicked)
         v_header.header_context_menu.connect(self._show_row_header_menu)
 
         self._table.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
@@ -636,7 +640,7 @@ class DataFrameViewer(QWidget):
             self.on_action("보기 초기화")
 
     def _on_selection_changed(self) -> None:
-        if self._syncing_column_selection:
+        if self._syncing_column_selection or self._syncing_row_selection:
             return
         active = self._active_cell
         self._selection = self._selection_ctrl.from_selection_model(
@@ -648,7 +652,7 @@ class DataFrameViewer(QWidget):
             self.on_selection_change(self._selection)
 
     def _on_current_changed(self, current, _previous) -> None:
-        if self._syncing_column_selection:
+        if self._syncing_column_selection or self._syncing_row_selection:
             return
         if not current.isValid() or self._df is None:
             return
@@ -728,13 +732,22 @@ class DataFrameViewer(QWidget):
         self._model.set_filtered_indices(self._sorted_filtered_indices())
         self._update_page_label()
 
-    def _on_row_header_clicked(self, section: int) -> None:
+    def _on_row_header_clicked(self, section: int, modifiers=Qt.KeyboardModifier.NoModifier) -> None:
         if self._df is None:
             return
         src = self._model.source_index_at(section)
         if src is None:
             return
-        self._select_row(src)
+        if modifiers & Qt.KeyboardModifier.ShiftModifier:
+            anchor = self._selection.anchor_row
+            if anchor is not None and self._selection.mode in {"row", "rows"}:
+                self._select_row_range(anchor, src)
+            else:
+                self._select_row(src)
+        elif modifiers & Qt.KeyboardModifier.ControlModifier:
+            self._toggle_row_in_selection(src)
+        else:
+            self._select_row(src)
 
     def _select_column(self, column: str) -> None:
         self._select_columns([column])
@@ -806,19 +819,68 @@ class DataFrameViewer(QWidget):
             self._select_column(column)
 
     def _select_row(self, source_index: object) -> None:
+        self._select_rows([source_index])
+
+    def _select_rows(self, source_indices: list[object]) -> None:
+        if self._df is None:
+            return
+        ordered = self._sorted_row_indices(set(source_indices))
+        if not ordered:
+            return
         cols = self._column_list()
         if not cols:
             return
-        top = (source_index, cols[0])
-        bottom = (source_index, cols[-1])
-        self._selection_ctrl.select_range(
-            self._table.selectionModel(),
-            top,
-            bottom,
-        )
-        self._selection = SelectionScope(mode="row", rows={source_index}, anchor_row=source_index)
-        self._active_cell = top
-        self._update_selection_label()
+        sel_model = self._table.selectionModel()
+        self._syncing_row_selection = True
+        sel_model.blockSignals(True)
+        try:
+            self._selection_ctrl.select_rows(sel_model, ordered, clear=True)
+            mode = "row" if len(ordered) == 1 else "rows"
+            self._selection = SelectionScope(
+                mode=mode,
+                rows=set(ordered),
+                anchor_row=ordered[0],
+            )
+            self._active_cell = (ordered[0], cols[0])
+            self._update_selection_label()
+            view_col = self._model.view_col_for_name(cols[0]) or 0
+            view_row = self._model.view_row_for_index(ordered[0])
+            if view_row is not None:
+                self._table.set_active_cell(view_row, view_col)
+            self._table.setFocus(Qt.FocusReason.OtherFocusReason)
+        finally:
+            sel_model.blockSignals(False)
+            self._syncing_row_selection = False
+
+    def _select_row_range(self, start_index: object, end_index: object) -> None:
+        idx_order = self._index_list()
+        try:
+            i0 = idx_order.index(start_index)
+            i1 = idx_order.index(end_index)
+        except ValueError:
+            self._select_row(end_index)
+            return
+        lo, hi = min(i0, i1), max(i0, i1)
+        self._select_rows(idx_order[lo : hi + 1])
+
+    def _toggle_row_in_selection(self, source_index: object) -> None:
+        if self._df is None:
+            return
+        if self._selection.mode in {"row", "rows"} and self._selection.rows:
+            rows = set(self._selection.rows)
+            if source_index in rows:
+                rows.discard(source_index)
+                if not rows:
+                    self._table.clearSelection()
+                    self._selection = SelectionScope()
+                    self._active_cell = None
+                    self._update_selection_label()
+                    return
+            else:
+                rows.add(source_index)
+            self._select_rows(list(rows))
+        else:
+            self._select_row(source_index)
 
     def _update_selection_label(self) -> None:
         self.selection_label.setText(self._selection.describe())
@@ -925,6 +987,61 @@ class DataFrameViewer(QWidget):
             return [[""]]
         return [row.split("\t") for row in rows]
 
+    def _assignments_at_anchor(
+        self,
+        start_idx: object,
+        start_col: str,
+        grid: list[list[str]],
+    ) -> list[tuple[object, str, str]]:
+        """앵커 셀부터 오른쪽·아래로 클립보드 격자 붙여넣기 (엑셀 방식)."""
+        idx_order = self._index_list()
+        col_order = self._column_list()
+        if not idx_order or not col_order:
+            return []
+        try:
+            r0 = idx_order.index(start_idx)
+            c0 = col_order.index(start_col)
+        except ValueError:
+            return []
+        out: list[tuple[object, str, str]] = []
+        for dr, row_vals in enumerate(grid):
+            for dc, value in enumerate(row_vals):
+                ri = r0 + dr
+                ci = c0 + dc
+                if ri >= len(idx_order) or ci >= len(col_order):
+                    continue
+                out.append((idx_order[ri], col_order[ci], value))
+        return out
+
+    def _ensure_paste_fits(self, grid: list[list[str]], anchor: tuple[object, str]) -> None:
+        """붙여넣기 범위가 표를 넘으면 행·열을 자동 추가."""
+        if self._df is None or not grid:
+            return
+        idx_order = self._index_list()
+        col_order = self._column_list()
+        rows_h = len(grid)
+        cols_w = max((len(r) for r in grid), default=0)
+        try:
+            r0 = idx_order.index(anchor[0])
+            c0 = col_order.index(anchor[1])
+        except ValueError:
+            return
+        from df_tool.operations import insert_column_at_end, insert_row_at_end
+
+        df = self._df
+        changed = False
+        need_rows = r0 + rows_h - len(idx_order)
+        if need_rows > 0:
+            df = insert_row_at_end(df, need_rows)
+            changed = True
+        need_cols = c0 + cols_w - len(col_order)
+        for _ in range(max(0, need_cols)):
+            df = insert_column_at_end(df)
+            changed = True
+        if changed:
+            self._apply_df(df, restructure=True)
+            self._refresh_search_columns()
+
     def _paste_anchor(self) -> tuple[object, str] | None:
         if self._selection.mode in {"column", "columns"} and self._selection.columns:
             cols = self._sorted_columns(self._selection.columns)
@@ -993,37 +1110,12 @@ class DataFrameViewer(QWidget):
                 return [(r, c, one) for r, c in self._selection.cells]
             sel_rows = self._sorted_row_indices({r for r, _ in self._selection.cells})
             sel_cols = self._sorted_columns({c for _, c in self._selection.cells})
-            out = []
-            for i, r in enumerate(sel_rows):
-                if i >= rows_h:
-                    break
-                row_vals = grid[i]
-                for j, c in enumerate(sel_cols):
-                    if (r, c) not in self._selection.cells:
-                        continue
-                    if j >= len(row_vals):
-                        break
-                    out.append((r, c, row_vals[j]))
-            return out
+            return self._assignments_at_anchor(sel_rows[0], sel_cols[0], grid)
 
         anchor = self._paste_anchor()
         if anchor is None:
             return []
-        start_idx, start_col = anchor
-        try:
-            r0 = idx_order.index(start_idx)
-            c0 = col_order.index(start_col)
-        except ValueError:
-            return []
-        out = []
-        for dr, row_vals in enumerate(grid):
-            for dc, value in enumerate(row_vals):
-                ri = r0 + dr
-                ci = c0 + dc
-                if ri >= len(idx_order) or ci >= len(col_order):
-                    continue
-                out.append((idx_order[ri], col_order[ci], value))
-        return out
+        return self._assignments_at_anchor(anchor[0], anchor[1], grid)
 
     def _on_copy(self) -> None:
         if self._df is None or self._table.state() == self._table.State.EditingState:
@@ -1038,6 +1130,9 @@ class DataFrameViewer(QWidget):
             return
         text = QGuiApplication.clipboard().text()
         grid = self._parse_clipboard_grid(text)
+        anchor = self._paste_anchor()
+        if anchor is not None:
+            self._ensure_paste_fits(grid, anchor)
         assignments = self._build_paste_assignments(grid)
         if not assignments:
             return

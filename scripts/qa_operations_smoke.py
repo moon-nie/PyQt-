@@ -17,6 +17,8 @@ from df_tool.operations import (
     split_column,
     group_summary,
     insert_column,
+    insert_row_at_end,
+    paste_cells,
     reorder_columns,
     resolve_column_key,
     set_cell_value,
@@ -103,6 +105,23 @@ def main() -> int:
     gdf = pd.DataFrame({"g": ["x", "x", "y"], "v": [1, 2, 3]})
     summary = group_summary(gdf, ["g"], "v", "sum")
     assert len(summary) == 2
+
+    # paste_cells (엑셀 TSV 격자 붙여넣기)
+    pdf = pd.DataFrame({"A": [None, None], "B": [None, None]})
+    pasted = paste_cells(
+        pdf,
+        [
+            (0, "A", "1"),
+            (0, "B", "2"),
+            (1, "A", "3"),
+            (1, "B", "4"),
+        ],
+    )
+    assert pasted["A"].tolist() == ["1", "3"]
+    assert pasted["B"].tolist() == ["2", "4"]
+
+    extended = insert_row_at_end(pdf, 1)
+    assert len(extended) == 3
 
     print("qa_operations_smoke: OK")
     return 0

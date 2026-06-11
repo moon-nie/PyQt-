@@ -199,3 +199,58 @@ class GridHorizontalHeader(GridHeaderView):
 
         self._reset_pointer_state()
         event.accept()
+
+
+class GridVerticalHeader(GridHeaderView):
+    """행 번호 헤더 — 클릭 선택 (Ctrl·Shift 다중 선택)."""
+
+    CLICK_SLOP = 8
+
+    row_header_clicked = pyqtSignal(int, object)  # logical, Qt.KeyboardModifiers
+
+    def __init__(self, parent=None) -> None:
+        super().__init__(Qt.Orientation.Vertical, parent)
+        self._press_logical: int | None = None
+        self._press_y = 0
+        self._press_modifiers = Qt.KeyboardModifier.NoModifier
+
+    def _logical_at(self, y: int) -> int:
+        point = QPoint(max(0, self.width() // 2), max(0, y))
+        logical = self.logicalIndexAt(point)
+        if logical >= 0:
+            return logical
+        logical = self.sectionAt(y)
+        return logical if logical >= 0 else -1
+
+    def _reset_pointer_state(self) -> None:
+        self._press_logical = None
+
+    def mousePressEvent(self, event: QMouseEvent) -> None:  # noqa: N802
+        if event.button() == Qt.MouseButton.RightButton:
+            self._emit_context_menu(event.pos())
+            event.accept()
+            return
+        if event.button() != Qt.MouseButton.LeftButton:
+            super().mousePressEvent(event)
+            return
+
+        self._press_y = event.pos().y()
+        self._press_modifiers = event.modifiers()
+        self._press_logical = self._logical_at(self._press_y)
+        event.accept()
+
+    def mouseReleaseEvent(self, event: QMouseEvent) -> None:  # noqa: N802
+        if event.button() != Qt.MouseButton.LeftButton:
+            super().mouseReleaseEvent(event)
+            return
+
+        moved = abs(event.pos().y() - self._press_y)
+        if (
+            moved <= self.CLICK_SLOP
+            and self._press_logical is not None
+            and self._press_logical >= 0
+        ):
+            self.row_header_clicked.emit(self._press_logical, self._press_modifiers)
+
+        self._reset_pointer_state()
+        event.accept()

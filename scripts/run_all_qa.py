@@ -3,13 +3,19 @@ from __future__ import annotations
 
 import subprocess
 import sys
+import os
 from pathlib import Path
 
 
 def main() -> int:
     root = Path(__file__).resolve().parent
+    project_root = root.parent
+    env = os.environ.copy()
+    env["PYTHONPATH"] = str(project_root) + os.pathsep + env.get("PYTHONPATH", "")
     scripts = [
         "qa_operations_smoke.py",
+        "qa_analysis_smoke.py",
+        "qa_analysis_panel_smoke.py",
         "qa_loader_smoke.py",
         "grid_smoke.py",
     ]
@@ -17,7 +23,7 @@ def main() -> int:
     for name in scripts:
         path = root / name
         print(f"--- {name} ---")
-        result = subprocess.run([sys.executable, str(path)], cwd=root.parent)
+        result = subprocess.run([sys.executable, str(path)], cwd=project_root, env=env)
         if result.returncode != 0:
             failed.append(name)
     if failed:

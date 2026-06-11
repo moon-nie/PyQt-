@@ -78,6 +78,9 @@ python -m pip install -r requirements.txt
 
 에러 없이 끝나면 OK.
 
+> **분석 탭(EDA)** 을 쓰려면 `requirements.txt`에 포함된 **matplotlib, numpy, scikit-learn, scipy** 가 함께 설치되어야 합니다.  
+> 분석 탭 상단에 「패키지가 없습니다」 배너가 보이면 위 명령을 다시 실행하세요.
+
 **`.xls` (구형 Excel) 파일**을 열려면 위 명령이 꼭 필요합니다.  
 (`python-calamine`, `xlrd`, `openpyxl` 등이 함께 설치됩니다.)
 

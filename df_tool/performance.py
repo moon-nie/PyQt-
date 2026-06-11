@@ -50,6 +50,11 @@ def should_defer_info_stats(row_count: int, col_count: int) -> bool:
     return row_count >= INFO_PANEL_DEFER_STATS_ROWS or col_count >= INFO_PANEL_DEFER_STATS_COLS
 
 
+def should_defer_analysis_charts(row_count: int, col_count: int) -> bool:
+    """분석 탭 차트·이상치 미리보기 지연 (대용량)."""
+    return should_defer_info_stats(row_count, col_count)
+
+
 def should_show_detailed_stats_by_default(row_count: int, col_count: int) -> bool:
     """작은 표는 결측·고유값 등 상세 통계 기본 표시."""
     return not should_defer_info_stats(row_count, col_count)

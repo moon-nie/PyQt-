@@ -5,7 +5,7 @@ from PyQt6.QtCore import Qt
 from PyQt6.QtWidgets import QAbstractItemView, QHeaderView, QTableView
 
 from df_tool.grid.delegate import GridCellDelegate
-from df_tool.grid.header import GridHeaderView, GridHorizontalHeader
+from df_tool.grid.header import GridHorizontalHeader, GridVerticalHeader
 from df_tool.grid.model import GridModel
 from df_tool.theme import COLORS
 
@@ -16,7 +16,7 @@ class GridView(QTableView):
     def __init__(self, model: GridModel, parent=None) -> None:
         super().__init__(parent)
         h_header = GridHorizontalHeader(self)
-        v_header = GridHeaderView(Qt.Orientation.Vertical, self)
+        v_header = GridVerticalHeader(self)
         self.setHorizontalHeader(h_header)
         self.setVerticalHeader(v_header)
         self.setModel(model)

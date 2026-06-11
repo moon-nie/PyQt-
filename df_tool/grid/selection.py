@@ -107,6 +107,42 @@ class SelectionController:
         )
         selection_model.select(selection, QItemSelectionModel.SelectionFlag.ClearAndSelect)
 
+    def select_rows(
+        self,
+        selection_model: QItemSelectionModel,
+        source_indices: list[object],
+        *,
+        clear: bool = True,
+    ) -> None:
+        """여러 행 전체 선택 (표에 보이는 열 기준)."""
+        if not source_indices:
+            return
+        col_count = self._model.columnCount()
+        if col_count < 1:
+            return
+        left_col = 0
+        right_col = col_count - 1
+        if clear:
+            selection_model.clearSelection()
+        for row_idx, source_index in enumerate(source_indices):
+            view_row = self._model.view_row_for_index(source_index)
+            if view_row is None:
+                continue
+            top = self._model.index(view_row, left_col)
+            bottom = self._model.index(view_row, right_col)
+            selection = QItemSelection(top, bottom)
+            flag = (
+                QItemSelectionModel.SelectionFlag.ClearAndSelect
+                if clear and row_idx == 0
+                else QItemSelectionModel.SelectionFlag.Select
+            )
+            selection_model.select(selection, flag)
+        first_row = self._model.view_row_for_index(source_indices[0])
+        if first_row is not None:
+            current = self._model.index(first_row, left_col)
+            if current.isValid():
+                selection_model.setCurrentIndex(current, QItemSelectionModel.SelectionFlag.NoUpdate)
+
     def select_columns(
         self,
         selection_model: QItemSelectionModel,

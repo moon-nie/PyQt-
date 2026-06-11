@@ -1,227 +1,129 @@
-# Gridloom — 프로젝트 파일 지도
+﻿# Gridloom — 프로젝트 파일 지도
 
-> **목적:** 파일이 많아도 「어디를 고치면 되는지」 바로 찾기  
-> **PyQt** (`gridloom.pyw`) 기준 · v0.7.2
+> **목적:** 파일이 많아도 어디를 고치면 되는지 바로 찾기  
+> **PyQt** (`gridloom.pyw`) 기준 · v0.8.10
 
 | 함께 볼 문서 | 대상 |
 |--------------|------|
 | [README.md](README.md) | 문서 인덱스 |
+| [SETUP_GUIDE.md](SETUP_GUIDE.md) | 설치·실행 |
 | [LEARNING_GUIDE.md](LEARNING_GUIDE.md) | 코드 공부 순서 |
 | [DEVELOPER_GUIDE.md](DEVELOPER_GUIDE.md) | 기능 추가 |
-| [CODING_STANDARDS.md](CODING_STANDARDS.md) | 작성 규칙 |
+| [CHANGELOG.md](CHANGELOG.md) | 변경 기록 |
 
 ---
 
 ## 1. 전체 트리
 
-```
+```text
 Gridloom/
-├── gridloom.pyw              ★ PyQt 엔트리
-├── requirements.txt
-├── README.md · CHANGELOG.md · *.md (문서)
+├── gridloom.pyw              PyQt 엔트리
+├── requirements.txt          런타임 의존성
+├── README.md · CHANGELOG.md  문서
 ├── sample_data.csv
 │
 ├── scripts/
 │   ├── run_all_qa.py         전체 QA
-│   ├── grid_smoke.py         GridModel·헤더 smoke
 │   ├── qa_operations_smoke.py
-│   └── qa_loader_smoke.py
+│   ├── qa_analysis_smoke.py
+│   ├── qa_analysis_panel_smoke.py
+│   ├── qa_loader_smoke.py
+│   └── grid_smoke.py
 │
 └── df_tool/
     ├── __init__.py           __version__
     ├── branding.py           APP_NAME, 설정 경로
-    │
-    ├── qt_app.py             ★ PyQt MainWindow
-    ├── qt_viewer.py          ★ 표 Facade
-    ├── qt_viewer_ops.py      구조 변경 + PyQt 다이얼로그
-    ├── qt_dialogs.py         PyQt 공통 다이얼로그 (저장·확인·도움말)
-    ├── qt_data_dialogs.py    VLOOKUP·조인·병합·결측채우기·그룹 요약
-    ├── qt_design_settings.py PyQt 디자인 설정
-    ├── qt_panels.py          Info / Code / ActivityLog
-    ├── qt_theme.py           app stylesheet
-    │
-    ├── grid/                 QTableView 엔진 (model, view, header, …)
-    ├── operations.py         ★ pandas SSOT
-    ├── loader.py             load_file / save_file
-    ├── selection.py          SelectionScope
     ├── theme.py              COLORS, theme.json
-    ├── performance.py        넓은 표 모드 임계값
-    └── help_content.py       사용법 텍스트
+    ├── qt_theme.py           공통 stylesheet
+    │
+    ├── qt_app.py             메인 창, 파일·undo·네비게이션
+    ├── qt_viewer.py          표 Facade
+    ├── qt_viewer_ops.py      행/열 구조 변경 + 팝업 연결
+    ├── qt_dialogs.py         공통 PyQt 다이얼로그
+    ├── qt_data_dialogs.py    VLOOKUP·조인·병합·결측채우기·그룹
+    ├── qt_panels.py          정보·코드·작업 로그 패널
+    ├── qt_design_settings.py 앱 색상 설정
+    │
+    ├── qt_analysis_panel.py  EDA 분석 탭 UI
+    ├── qt_analysis_worker.py 백그라운드 분석 작업(QThreadPool)
+    ├── qt_chart_style_dialog.py  차트 꾸미기 다이얼로그
+    ├── analysis.py           EDA 통계·차트 추천·PCA
+    ├── analysis_deps.py      matplotlib/sklearn/scipy 의존성 검사
+    ├── chart_style.py        차트 색·레이아웃 설정 저장
+    ├── eda_report.py         차트 포함 HTML EDA 리포트
+    │
+    ├── operations.py         pandas 변환 SSOT
+    ├── loader.py             load_file / save_file
+    ├── performance.py        대용량·넓은 표 임계값
+    ├── help_content.py       앱 도움말 텍스트
+    ├── selection.py          SelectionScope
+    └── grid/
+        ├── model.py          GridModel
+        ├── view.py           GridView
+        ├── header.py         헤더 드래그·우클릭
+        ├── delegate.py       셀 paint
+        ├── selection.py      SelectionController
+        └── state.py          선택·상태 모델
 ```
 
 ---
 
-## 2. 실행 엔드포인트
+## 2. 실행 흐름
 
-```
-[사용자] gridloom.pyw
-            │
-            ▼
-    gridloom.pyw :: main()
-            │
-            ▼
-    qt_app.MainWindow
-            ├── QApplication + theme
-            ├── _build_layout()
-            ├── DataFrameViewer
-            └── show()
+```text
+gridloom.pyw
+  └── qt_app.MainWindow
+        ├── DataFrameViewer (qt_viewer.py)
+        │     └── grid/ (model, view, header, delegate)
+        ├── InfoPanel / CodePanel / ActivityLogPanel
+        ├── AnalysisPanel (qt_analysis_panel.py)
+        ├── loader.load_file / save_file
+        └── operations.* (데이터 변환)
 ```
 
-| 파일 | 진입 | 비고 |
+---
+
+## 3. 기능별 수정 위치
+
+| 기능 | 우선 확인 파일 |
+|------|----------------|
+| 파일 열기·저장 | `loader.py`, `qt_app.py` |
+| 표 표시·편집 | `qt_viewer.py`, `grid/model.py`, `grid/view.py` |
+| 행/열 선택 | `grid/selection.py`, `grid/header.py`, `selection.py` |
+| VLOOKUP·조인·병합 | `qt_data_dialogs.py`, `operations.py` |
+| 결측 채우기(KNN/MICE) | `operations.py`, `qt_data_dialogs.py`, `qt_analysis_panel.py` |
+| EDA 통계·추천 | `analysis.py` |
+| 분석 탭 UI | `qt_analysis_panel.py` |
+| 이상치(IQR/Z/IF) | `operations.py`, `analysis.py`, `qt_analysis_panel.py` |
+| 차트 꾸미기 | `chart_style.py`, `qt_chart_style_dialog.py`, `qt_analysis_panel.py` |
+| HTML 리포트 | `eda_report.py`, `qt_analysis_panel.py` |
+| 대용량 최적화 | `performance.py`, `qt_app.py`, `qt_viewer.py` |
+| 도움말 | `help_content.py` |
+| QA | `scripts/run_all_qa.py`, `scripts/qa_*_smoke.py` |
+
+---
+
+## 4. 설정 파일
+
+| 파일 | 위치 | 설명 |
 |------|------|------|
-| `gridloom.pyw` | `main()` | 유일한 실행 엔트리 |
-| `df_tool/qt_app.py` | `MainWindow` | PyQt 메인 |
+| `theme.json` | `~/.gridloom/` | 앱 색상 |
+| `chart_style.json` | `~/.gridloom/` | 분석 차트 색·레이아웃 |
+| `window.json` | `~/.gridloom/` | 창 상태 |
 
 ---
 
-## 3. 화면 ↔ 코드 (PyQt)
-
-```
-┌─ qt_app.MainWindow ──────────────────────────────────────────────┐
-│  toolbar: [열기][저장][시트][도움말▾]                              │
-│  nav: [메인] [작업 로그]                                          │
-│  ┌─ qt_viewer.DataFrameViewer ────────┬─ qt_panels ────────────┐ │
-│  │  검색·툴바 (VLOOKUP·조인·결측채우기…) │ InfoPanel (읽기전용)   │ │
-│  │  grid.GridView + GridModel          │ CodePanel              │ │
-│  └─────────────────────────────────────┴────────────────────────┘ │
-│  status bar                                                       │
-└───────────────────────────────────────────────────────────────────┘
-```
-
----
-
-## 4. 데이터 흐름
-
-```
-load_file (loader.py)
-    → MainWindow._apply_dataframe
-    → viewer.set_dataframe
-    → GridModel._sync_from_dataframe
-
-사용자 편집/메뉴
-    → operations.* (또는 viewer 내부)
-    → viewer._apply_df(restructure=?)
-    → on_change → MainWindow (undo stack)
-
-save_file (loader.py) ← viewer.get_dataframe()
-```
-
----
-
-## 5. 파일별 상세
-
-### 5-1. PyQt UI
-
-| 파일 | 주요 클래스/함수 | 수정 시점 |
-|------|------------------|-----------|
-| `qt_app.py` | `MainWindow`, `open_file`, `_apply_dataframe`, `refresh_theme` | 파일·undo·전역 메뉴 |
-| `qt_viewer.py` | `DataFrameViewer`, `_apply_df`, 우클릭·단축키 | 표 UX·검색·복붙 |
-| `qt_viewer_ops.py` | `insert_*_with_dialog`, `merge/split_*_with_dialog` | 행/열 구조 + 입력창 |
-| `qt_dialogs.py` | `qt_merge_columns_dialog`, `qt_split_column_dialog`, … | 공통·열 병합/분리 팝업 |
-| `qt_data_dialogs.py` | `qt_vlookup_dialog`, `qt_fill_na_dialog`, … | 데이터 처리 팝업 |
-| `qt_design_settings.py` | `show_design_settings_dialog`, `THEME_GROUPS` | 색상 설정 UI |
-| `qt_panels.py` | `InfoPanel`, `CodePanel`, `ActivityLogPanel` | 사이드바 |
-| `qt_theme.py` | `app_stylesheet`, `card_frame_style` | 전역 스타일 |
-
-### 5-2. grid/
-
-| 파일 | 역할 |
-|------|------|
-| `model.py` | DataFrame ↔ Qt 인덱스, `setData`, `replace_dataframe` |
-| `view.py` | QTableView 설정, 키보드 포커스 |
-| `header.py` | 열 클릭 선택, Ctrl 다중 선택, 드래그 재정렬, 리사이즈 |
-| `delegate.py` | 격자선, 활성 셀 테두리 |
-| `selection.py` | QItemSelection ↔ `SelectionScope` |
-| `state.py` | 정렬·검색 상태 |
-| `format.py` | 넓은 표 모드 축약 표시 |
-
-### 5-3. 데이터·공통
-
-| 파일 | 역할 |
-|------|------|
-| `operations.py` | 모든 pandas 변환 (UI import 없음) |
-| `loader.py` | CSV/Excel/Parquet 등 I/O, 시트 |
-| `selection.py` | `SelectionScope` dataclass |
-| `theme.py` | `COLORS`, `load_theme_config`, `save_theme_config` |
-| `performance.py` | `is_heavy_dataframe`, 열 윈도우 |
-| `help_content.py` | `HELP_TEXT` (도움말 > 사용법) |
-
-### 5-4. (삭제됨) Tk 레거시
-
-v0.7.1에서 `app.py`, `viewer.py`, `dialogs.py`, `gridloom_tk.pyw` 등 Tk 스택 전부 제거.
-
----
-
-## 6. operations.py 주요 함수
-
-| 함수 | 용도 |
-|------|------|
-| `resolve_column_key`, `resolve_column_keys` | int/str 열명 |
-| `insert_row`, `insert_column`, `delete_rows`, `delete_columns` | 구조 |
-| `rename_column`, `duplicate_column` | 열 메타 |
-| `reorder_columns` | 열 드래그 |
-| `sort_dataframe`, `filter_rows` | 정렬·검색 |
-| `find_replace` | Ctrl+F |
-| `fill_column`, `fill_sequential`, `fill_na` | 채우기·결측치 통계 채우기 |
-| `merge_columns`, `split_column` | 열 가로 병합·분리 |
-| `drop_duplicates`, `drop_na_rows` | 정리 |
-| `merge_dataframes`, `concat_dataframes` | 조인·세로 병합 |
-| `vlookup`, `group_summary` | VLOOKUP·그룹 요약 |
-
----
-
-## 7. qt_viewer ↔ qt_app 콜백
-
-| 콜백 | qt_app 핸들러 (대표) |
-|------|----------------------|
-| `on_change` | undo, info 갱신 |
-| `on_drop_duplicates` | `_drop_duplicates` |
-| `on_vlookup` | `run_vlookup` |
-| `on_merge` / `on_concat` | `run_merge` / `run_concat` |
-| `on_fill_na` / `on_fill_na_column` | `fill_missing_values` |
-| `on_add_column` | `add_column` |
-
----
-
-## 8. 설정·데이터 경로
-
-| 항목 | 경로 |
-|------|------|
-| 테마 | `~/.gridloom/theme.json` |
-| 구 테마 | `~/.dataframe_tool/theme.json` (자동 인식) |
-| 버전 | `df_tool/__init__.py` → `__version__` |
-
----
-
-## 9. QA
+## 5. QA
 
 ```bash
-set PYTHONPATH=.
 python scripts/run_all_qa.py
 ```
 
-| 스크립트 | 검증 |
-|----------|------|
-| `grid_smoke.py` | GridModel, 헤더, 열 재정렬 |
-| `qa_operations_smoke.py` | operations |
-| `qa_loader_smoke.py` | loader |
+포함 항목:
 
----
+- `qa_operations_smoke.py`
+- `qa_analysis_smoke.py`
+- `qa_analysis_panel_smoke.py`
+- `qa_loader_smoke.py`
+- `grid_smoke.py`
 
-## 10. 「이걸 고치려면?」 빠른 표
-
-| 하고 싶은 일 | 파일 |
-|--------------|------|
-| 새 pandas 변환 | `operations.py` |
-| 표 우클릭/단축키 | `qt_viewer.py` |
-| 행/열 추가 다이얼로그 | `qt_viewer_ops.py`, `qt_dialogs.py` |
-| 열 드래그/헤더 | `grid/header.py` |
-| 셀 그리기 | `grid/delegate.py` |
-| 파일 열기/저장 | `loader.py`, `qt_app.py` |
-| 색상/테마 | `theme.py`, `qt_design_settings.py` |
-| 도움말 텍스트 | `help_content.py` |
-| 사용자 문서 | 루트 `*.md` |
-| VLOOKUP·조인·병합 UI | `qt_data_dialogs.py` |
-| 결측치 채우기 | `qt_data_dialogs.py`, `qt_panels.py` |
-| 열 병합·분리 | `qt_dialogs.py`, `qt_viewer_ops.py`, `qt_viewer.py` |
-| 검색·필터 UX | `qt_viewer.py` |

@@ -532,6 +532,8 @@ FILL_NA_METHOD_LABELS: dict[str, str] = {
     "ffill": "위 값으로 채우기 (ffill)",
     "bfill": "아래 값으로 채우기 (bfill)",
     "constant": "직접 입력",
+    "knn": "KNN (모델 기반)",
+    "mice": "MICE (반복 대체)",
 }
 
 
@@ -543,7 +545,7 @@ def column_fill_na_methods(series: pd.Series) -> list[str]:
     """열 dtype에 맞는 결측치 채우기 방식 코드 목록."""
     methods: list[str] = []
     if column_supports_numeric_fill(series):
-        methods.extend(["mean", "median", "min", "max"])
+        methods.extend(["mean", "median", "min", "max", "knn", "mice"])
     methods.extend(["mode", "ffill", "bfill", "constant"])
     return methods
 
@@ -608,6 +610,163 @@ def fill_na(
     value = compute_fill_na_scalar(series, method, constant=constant_value)
     result.loc[mask, key] = value
     return result
+
+
+def fill_na_knn(
+    df: pd.DataFrame,
+    columns: list[str],
+    *,
+    n_neighbors: int = 5,
+) -> pd.DataFrame:
+    """숫자 열의 결측치를 KNNImputer로 대체합니다."""
+    from sklearn.impute import KNNImputer
+
+    result = df.copy()
+    keys = resolve_column_keys(result, columns)
+    numeric_keys = [k for k in keys if column_supports_numeric_fill(result[k])]
+    if not numeric_keys:
+        raise ValueError("KNN 대체에 사용할 숫자 열이 없습니다.")
+    has_null = any(null_mask(result[k]).any() for k in numeric_keys)
+    if not has_null:
+        return result
+    if len(result) < 2:
+        raise ValueError("KNN 대체는 데이터 행이 2개 이상 필요합니다.")
+
+    n_neighbors = max(1, min(n_neighbors, len(result) - 1))
+    imputer = KNNImputer(n_neighbors=n_neighbors)
+    imputed = imputer.fit_transform(result[numeric_keys].astype(float))
+    for i, key in enumerate(numeric_keys):
+        mask = null_mask(result[key])
+        if mask.any():
+            result.loc[mask, key] = imputed[mask.to_numpy(), i]
+    return result
+
+
+def fill_na_mice(
+    df: pd.DataFrame,
+    columns: list[str],
+    *,
+    max_iter: int = 10,
+) -> pd.DataFrame:
+    """숫자 열 결측치를 IterativeImputer(MICE)로 대체합니다."""
+    from sklearn.experimental import enable_iterative_imputer  # noqa: F401
+    from sklearn.impute import IterativeImputer
+
+    result = df.copy()
+    keys = resolve_column_keys(result, columns)
+    numeric_keys = [k for k in keys if column_supports_numeric_fill(result[k])]
+    if not numeric_keys:
+        raise ValueError("MICE 대체에 사용할 숫자 열이 없습니다.")
+    has_null = any(null_mask(result[k]).any() for k in numeric_keys)
+    if not has_null:
+        return result
+    if len(result) < 2:
+        raise ValueError("MICE 대체는 데이터 행이 2개 이상 필요합니다.")
+
+    max_iter = max(1, min(max_iter, 50))
+    imputer = IterativeImputer(max_iter=max_iter, random_state=42)
+    imputed = imputer.fit_transform(result[numeric_keys].astype(float))
+    for i, key in enumerate(numeric_keys):
+        mask = null_mask(result[key])
+        if mask.any():
+            result.loc[mask, key] = imputed[mask.to_numpy(), i]
+    return result
+
+
+def _outlier_mask_iqr(series: pd.Series) -> pd.Series:
+    valid = series[~null_mask(series)].astype(float)
+    if len(valid) < 4:
+        return pd.Series(False, index=series.index)
+    q1 = valid.quantile(0.25)
+    q3 = valid.quantile(0.75)
+    iqr = q3 - q1
+    if iqr == 0:
+        return pd.Series(False, index=series.index)
+    low = q1 - 1.5 * iqr
+    high = q3 + 1.5 * iqr
+    numeric = pd.to_numeric(series, errors="coerce")
+    return (numeric < low) | (numeric > high)
+
+
+def _outlier_mask_zscore(series: pd.Series, *, z_threshold: float = 3.0) -> pd.Series:
+    valid = pd.to_numeric(series, errors="coerce")
+    mask_null = valid.isna()
+    non_null = valid[~mask_null]
+    if len(non_null) < 2:
+        return pd.Series(False, index=series.index)
+    mean = non_null.mean()
+    std = non_null.std()
+    if std == 0 or pd.isna(std):
+        return pd.Series(False, index=series.index)
+    z = (valid - mean).abs() / std
+    return (z > z_threshold) & ~mask_null
+
+
+def _outlier_mask_isolation_forest(
+    df: pd.DataFrame,
+    columns: list[str],
+    *,
+    contamination: float = 0.05,
+) -> pd.Series:
+    from sklearn.ensemble import IsolationForest
+
+    keys = resolve_column_keys(df, columns)
+    numeric_keys = [k for k in keys if column_supports_numeric_fill(df[k])]
+    if not numeric_keys:
+        return pd.Series(False, index=df.index)
+    numeric = df[numeric_keys].apply(pd.to_numeric, errors="coerce")
+    valid = numeric.dropna()
+    if len(valid) < 10:
+        return pd.Series(False, index=df.index)
+    contamination = max(0.01, min(contamination, 0.5))
+    clf = IsolationForest(contamination=contamination, random_state=42, n_jobs=1)
+    preds = clf.fit_predict(valid)
+    mask = pd.Series(False, index=df.index)
+    mask.loc[valid.index] = preds == -1
+    return mask
+
+
+def outlier_row_mask(
+    df: pd.DataFrame,
+    columns: list[str],
+    method: str,
+    *,
+    z_threshold: float = 3.0,
+    contamination: float = 0.05,
+) -> pd.Series:
+    """선택 열 중 하나라도 이상치이면 True."""
+    if method == "isolation_forest":
+        return _outlier_mask_isolation_forest(df, columns, contamination=contamination)
+    keys = resolve_column_keys(df, columns)
+    numeric_keys = [k for k in keys if column_supports_numeric_fill(df[k])]
+    if not numeric_keys:
+        return pd.Series(False, index=df.index)
+    combined = pd.Series(False, index=df.index)
+    for key in numeric_keys:
+        if method == "iqr":
+            col_mask = _outlier_mask_iqr(df[key])
+        elif method == "zscore":
+            col_mask = _outlier_mask_zscore(df[key], z_threshold=z_threshold)
+        else:
+            raise ValueError(f"지원하지 않는 이상치 방식: {method}")
+        combined |= col_mask.fillna(False)
+    return combined
+
+
+def drop_outlier_rows(
+    df: pd.DataFrame,
+    columns: list[str],
+    method: str,
+    *,
+    z_threshold: float = 3.0,
+    contamination: float = 0.05,
+) -> tuple[pd.DataFrame, int, pd.Series]:
+    """이상치 행 제거. (결과 df, 제거 건수, 이상치 마스크) 반환."""
+    mask = outlier_row_mask(
+        df, columns, method, z_threshold=z_threshold, contamination=contamination
+    )
+    removed = int(mask.sum())
+    return df.loc[~mask].copy(), removed, mask
 
 
 def drop_duplicates(df: pd.DataFrame, subset: list[str] | None = None) -> pd.DataFrame:

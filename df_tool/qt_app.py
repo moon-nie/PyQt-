@@ -45,6 +45,9 @@ from df_tool.performance import (
     LARGE_FILE_WARN_ROWS,
     adaptive_undo_depth,
     format_file_size,
+    is_heavy_dataframe,
+    is_wide_dataframe,
+    should_defer_analysis_charts,
     should_prompt_large_file,
 )
 from df_tool.operations import (
@@ -55,6 +58,8 @@ from df_tool.operations import (
     drop_duplicates,
     drop_na_rows,
     fill_na,
+    fill_na_knn,
+    fill_na_mice,
     find_replace as op_find_replace,
     group_summary,
     insert_column_at_end,
@@ -68,6 +73,7 @@ from df_tool.qt_dialogs import (
     qt_find_replace_dialog,
     qt_select_column_dialog,
 )
+from df_tool.qt_analysis_panel import AnalysisPanel
 from df_tool.qt_panels import ActivityLogPanel, CodePanel, InfoPanel
 from df_tool.qt_theme import (
     app_stylesheet,
@@ -101,8 +107,14 @@ class MainWindow(QMainWindow):
         self._before_summary_df: pd.DataFrame | None = None
         self._current_page = "main"
         self._updating_sheet_combo = False
+        self._data_token = 0
+        self._partial_load_limit: int | None = None
+        self._pending_load_limit: int | None = None
         self._load_executor = ThreadPoolExecutor(max_workers=1, thread_name_prefix="gridloom-load")
         self._load_future: Future | None = None
+        self._work_executor = ThreadPoolExecutor(max_workers=1, thread_name_prefix="gridloom-work")
+        self._fill_future: Future | None = None
+        self._fill_context: tuple[int, str] | None = None
         self._loading = False
         self._info_refresh_timer = QTimer(self)
         self._info_refresh_timer.setSingleShot(True)
@@ -180,16 +192,25 @@ class MainWindow(QMainWindow):
         )
         self.path_label.setMinimumWidth(120)
         row2.addWidget(self.path_label, stretch=1)
+        self._mode_badges: list[QLabel] = []
+        for _ in range(4):
+            badge = QLabel("")
+            badge.hide()
+            row2.addWidget(badge)
+            self._mode_badges.append(badge)
         toolbar_layout.addLayout(row2)
         root.addWidget(self._toolbar)
 
         nav = QHBoxLayout()
         nav.setSpacing(6)
-        self._nav_main_btn = nav_button("메인", active=True)
+        self._nav_main_btn = nav_button("가공", active=True)
         self._nav_main_btn.clicked.connect(lambda: self._show_page("main"))
+        self._nav_analysis_btn = nav_button("분석", active=False)
+        self._nav_analysis_btn.clicked.connect(lambda: self._show_page("analysis"))
         self._nav_log_btn = nav_button("작업 로그", active=False)
         self._nav_log_btn.clicked.connect(lambda: self._show_page("log"))
         nav.addWidget(self._nav_main_btn)
+        nav.addWidget(self._nav_analysis_btn)
         nav.addWidget(self._nav_log_btn)
         nav.addStretch()
         root.addLayout(nav)
@@ -242,6 +263,14 @@ class MainWindow(QMainWindow):
         splitter.setSizes([860, 300])
 
         self._stack.addWidget(main_page)
+
+        self.analysis_panel = AnalysisPanel(
+            get_dataframe=lambda: self._loaded.dataframe if self._loaded else None,
+            on_apply=self._apply_analysis_result,
+            on_log=self._log_action,
+        )
+        self._stack.addWidget(self.analysis_panel)
+
         self._activity_log = ActivityLogPanel()
         self._stack.addWidget(self._activity_log)
         self._show_page("main")
@@ -255,11 +284,14 @@ class MainWindow(QMainWindow):
         self.setStyleSheet(app_stylesheet())
         self._toolbar.setStyleSheet(toolbar_frame_style())
         self.path_label.setStyleSheet(f"color: {COLORS['text_secondary']};")
+        self._sync_mode_badges()
         style_nav_button(self._nav_main_btn, active=self._current_page == "main")
+        style_nav_button(self._nav_analysis_btn, active=self._current_page == "analysis")
         style_nav_button(self._nav_log_btn, active=self._current_page == "log")
         self.viewer.apply_theme()
         self.info_panel.apply_theme()
         self.code_panel.apply_theme()
+        self.analysis_panel.apply_theme()
         self._activity_log.apply_theme()
 
     def _bind_shortcuts(self) -> None:
@@ -281,6 +313,43 @@ class MainWindow(QMainWindow):
             act = QAction(self, shortcut=QKeySequence(seq), triggered=lambda _c=False, fn=handler: self._run_table_shortcut(fn))
             act.setShortcutContext(Qt.ShortcutContext.ApplicationShortcut)
             self.addAction(act)
+
+    def _badge_style(self, *, warning: bool = False) -> str:
+        bg = COLORS["primary_soft"] if warning else COLORS["surface_alt"]
+        fg = COLORS["warning"] if warning else COLORS["text_secondary"]
+        return (
+            f"background: {bg}; color: {fg}; border: 1px solid {COLORS['border']}; "
+            "border-radius: 10px; padding: 2px 8px; font-size: 9pt;"
+        )
+
+    def _sync_mode_badges(self) -> None:
+        badges: list[tuple[str, bool, str]] = []
+        if self._loaded is not None:
+            df = self._loaded.dataframe
+            rows, cols = len(df), len(df.columns)
+            if self._partial_load_limit is not None:
+                badges.append(
+                    (
+                        f"부분 로드 {self._partial_load_limit:,}행",
+                        True,
+                        "원본 파일의 앞부분만 표시 중입니다. 저장 시 현재 보이는 데이터만 저장됩니다.",
+                    )
+                )
+            if is_heavy_dataframe(rows, cols):
+                badges.append(("대용량", True, "스크롤·검색·분석에 시간이 걸릴 수 있습니다."))
+            if is_wide_dataframe(cols):
+                badges.append(("넓은 표", False, "열이 많아 가로 스크롤 중심으로 탐색합니다."))
+            if should_defer_analysis_charts(rows, cols):
+                badges.append(("분석 수동", False, "분석 차트는 [지금 그리기] 또는 각 탭 버튼으로 그립니다."))
+        for idx, badge in enumerate(self._mode_badges):
+            if idx < len(badges):
+                text, warning, tip = badges[idx]
+                badge.setText(text)
+                badge.setToolTip(tip)
+                badge.setStyleSheet(self._badge_style(warning=warning))
+                badge.show()
+            else:
+                badge.hide()
 
     def _run_table_shortcut(self, handler) -> None:
         focus = self.focusWidget()
@@ -330,9 +399,16 @@ class MainWindow(QMainWindow):
 
     def _show_page(self, page: str) -> None:
         self._current_page = page
-        self._stack.setCurrentIndex(0 if page == "main" else 1)
+        index = {"main": 0, "analysis": 1, "log": 2}.get(page, 0)
+        self._stack.setCurrentIndex(index)
         style_nav_button(self._nav_main_btn, active=page == "main")
+        style_nav_button(self._nav_analysis_btn, active=page == "analysis")
         style_nav_button(self._nav_log_btn, active=page == "log")
+        if page == "analysis":
+            self.analysis_panel.refresh()
+
+    def _apply_analysis_result(self, df: pd.DataFrame, message: str) -> None:
+        self._apply_dataframe(df, message=message)
 
     @staticmethod
     def _format_action_message(message: str) -> str:
@@ -374,7 +450,8 @@ class MainWindow(QMainWindow):
         if self._loaded is None:
             return "준비"
         df = self._loaded.dataframe
-        return f"{self._loaded.path.name}  |  {len(df):,}행 × {len(df.columns):,}열"
+        suffix = "  |  부분 로드" if self._partial_load_limit is not None else ""
+        return f"{self._loaded.path.name}  |  {len(df):,}행 × {len(df.columns):,}열{suffix}"
 
     def _require_data(self) -> bool:
         if self._loaded is None:
@@ -395,10 +472,13 @@ class MainWindow(QMainWindow):
         if self._loaded is None:
             return
         self._push_undo()
+        self._data_token += 1
         self._loaded.dataframe = df
         if self._loaded.active_sheet:
             self._loaded.sheet_frames[self._loaded.active_sheet] = df
+        self.analysis_panel.invalidate_pending_work()
         self._schedule_info_refresh()
+        self._sync_mode_badges()
         self._set_status(f"데이터 수정됨 — {len(df):,}행 × {len(df.columns):,}열")
 
     def _schedule_info_refresh(self) -> None:
@@ -411,11 +491,16 @@ class MainWindow(QMainWindow):
         if self._loaded is None:
             return
         self._push_undo()
+        self._data_token += 1
         self._loaded.dataframe = df
         if self._loaded.active_sheet:
             self._loaded.sheet_frames[self._loaded.active_sheet] = df
+        self.analysis_panel.invalidate_pending_work()
         self.viewer.set_dataframe(df, reset_sort=False, copy=False, new_session=False)
         self._refresh_info()
+        self._sync_mode_badges()
+        if self._current_page == "analysis":
+            self.analysis_panel.refresh()
         if message:
             self._set_status(f"{message} — {len(df):,}행 × {len(df.columns):,}열")
             self._log_action("success", self._format_action_message(message), f"{len(df):,}행 × {len(df.columns):,}열")
@@ -470,6 +555,8 @@ class MainWindow(QMainWindow):
         self._before_summary_df = None
         self.viewer.set_restore_available(False)
         self._loaded = None
+        self._partial_load_limit = None
+        self._sync_mode_badges()
         gc.collect()
 
     def _set_loading(self, active: bool, message: str = "") -> None:
@@ -495,6 +582,7 @@ class MainWindow(QMainWindow):
         if limit is False:
             return
         nrows = limit if isinstance(limit, int) else None
+        self._pending_load_limit = nrows
         self._pending_prev_path = self._loaded.path if self._loaded else None
         self._pending_sheet_name = sheet_name
         self._release_current_file()
@@ -533,6 +621,9 @@ class MainWindow(QMainWindow):
         prev_path = getattr(self, "_pending_prev_path", None)
         prev_sheet = getattr(self, "_pending_sheet_name", None)
         self._loaded = loaded
+        self._partial_load_limit = self._pending_load_limit
+        self._pending_load_limit = None
+        self._data_token += 1
         self._undo_stack.clear()
         self._before_summary_df = None
         self.viewer.set_restore_available(False)
@@ -552,6 +643,11 @@ class MainWindow(QMainWindow):
         self.viewer.set_dataframe(loaded.dataframe, copy=False, new_session=True)
         self.info_panel.apply_default_stats_visibility(len(loaded.dataframe), len(loaded.dataframe.columns))
         self._refresh_info()
+        self._sync_mode_badges()
+        if self._current_page == "analysis":
+            self.analysis_panel.refresh()
+        else:
+            self.analysis_panel.refresh_light()
         self._sync_sheet_selector()
         self._set_status_persistent()
         self.setWindowTitle(f"{APP_NAME} — {loaded.path.name}")
@@ -606,6 +702,7 @@ class MainWindow(QMainWindow):
         self.viewer.prepare_for_new_dataset()
         self._loaded.active_sheet = sheet_name
         self._loaded.dataframe = df
+        self._partial_load_limit = None
         self._undo_stack.clear()
         self._before_summary_df = None
         self.viewer.set_restore_available(False)
@@ -650,6 +747,21 @@ class MainWindow(QMainWindow):
         if not result:
             return
         path, save_format = result
+        if self._partial_load_limit is not None and path.resolve() == self._loaded.path.resolve():
+            reply = QMessageBox.question(
+                self,
+                "부분 로드 저장 확인",
+                (
+                    f"현재 파일은 처음 {self._partial_load_limit:,}행만 열린 상태입니다.\n\n"
+                    "원본 경로에 저장하면 화면에 보이지 않는 나머지 행은 저장 파일에서 제외됩니다.\n"
+                    "그래도 원본 파일에 덮어쓸까요?"
+                ),
+                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+            )
+            if reply != QMessageBox.StandardButton.Yes:
+                self._set_status("부분 로드 데이터의 원본 덮어쓰기를 취소했습니다.")
+                self._log_action("warning", "부분 로드 저장 취소", "현재 보이는 일부 데이터만 저장될 수 있어 취소했습니다.")
+                return
         if self._loaded.active_sheet:
             self._loaded.remember_current_sheet()
         try:
@@ -683,9 +795,15 @@ class MainWindow(QMainWindow):
             self._toast_warning("되돌릴 작업이 없습니다.")
             return
         df = self._undo_stack.pop()
+        self._data_token += 1
         self._loaded.dataframe = df
+        self.analysis_panel.invalidate_pending_work()
         self.viewer.set_dataframe(df, reset_sort=False, copy=False, new_session=False)
         self._refresh_info()
+        if self._current_page == "analysis":
+            self.analysis_panel.refresh()
+        else:
+            self.analysis_panel.refresh_light()
         self._set_status(f"실행 취소 — {len(df):,}행 × {len(df.columns):,}열")
         self._log_action("success", "실행 취소", f"{len(df):,}행 × {len(df.columns):,}열")
 
@@ -768,14 +886,74 @@ class MainWindow(QMainWindow):
         result = qt_fill_na_dialog(self, df, column)
         if not result:
             return
-        method, constant = result
+        method, constant, n_neighbors = result
         label = FILL_NA_METHOD_LABELS.get(method, method)
+        detail = f"k={n_neighbors}" if method == "knn" and n_neighbors else None
+        msg = f"'{column}' 결측치 채우기 ({label})"
+        if detail:
+            msg = f"{msg}, {detail}"
+        if method in {"knn", "mice"}:
+            self._fill_missing_in_column_async(
+                df.copy(deep=True),
+                column,
+                method,
+                n_neighbors=n_neighbors,
+                message=msg,
+            )
+            return
         try:
             new_df = fill_na(df, column, method, constant_value=constant)
         except Exception as exc:
             self._toast_error("결측치 채우기 실패", str(exc))
             return
-        self._apply_dataframe(new_df, message=f"'{column}' 결측치 채우기 ({label})")
+        self._apply_dataframe(new_df, message=msg)
+
+    def _fill_missing_in_column_async(
+        self,
+        df: pd.DataFrame,
+        column: str,
+        method: str,
+        *,
+        n_neighbors: int | None,
+        message: str,
+    ) -> None:
+        if self._fill_future is not None and not self._fill_future.done():
+            self._toast_warning("결측치 채우기 작업이 진행 중입니다.", detail="끝난 뒤 다시 시도하세요.")
+            return
+        token = self._data_token
+
+        def work() -> pd.DataFrame:
+            if method == "knn":
+                return fill_na_knn(df, [column], n_neighbors=n_neighbors or 5)
+            return fill_na_mice(df, [column])
+
+        self._fill_context = (token, message)
+        self._fill_future = self._work_executor.submit(work)
+        self._set_status(f"{message} — 백그라운드 적용 중…", revert_after_ms=None)
+        self._log_action("info", "결측치 채우기 시작", message)
+        QTimer.singleShot(80, self._poll_fill_missing)
+
+    def _poll_fill_missing(self) -> None:
+        if self._fill_future is None:
+            return
+        if not self._fill_future.done():
+            QTimer.singleShot(80, self._poll_fill_missing)
+            return
+        future = self._fill_future
+        context = self._fill_context
+        self._fill_future = None
+        self._fill_context = None
+        token, message = context if context is not None else (-1, "결측치 채우기")
+        try:
+            new_df = future.result()
+        except Exception as exc:
+            self._toast_error("결측치 채우기 실패", str(exc) or type(exc).__name__)
+            return
+        if token != self._data_token:
+            self._set_status("데이터가 변경되어 결측치 채우기 결과를 적용하지 않았습니다.")
+            self._log_action("warning", "결측치 채우기 결과 폐기", "작업 중 데이터가 변경되었습니다.")
+            return
+        self._apply_dataframe(new_df, message=message)
 
     def drop_na_rows(self) -> None:
         if not self._require_data() or self._loaded is None:
@@ -934,7 +1112,10 @@ class MainWindow(QMainWindow):
     def closeEvent(self, event) -> None:  # noqa: N802
         if self._load_future is not None and not self._load_future.done():
             self._load_future.cancel()
+        if self._fill_future is not None and not self._fill_future.done():
+            self._fill_future.cancel()
         self._load_executor.shutdown(wait=False, cancel_futures=True)
+        self._work_executor.shutdown(wait=False, cancel_futures=True)
         event.accept()
 
     def run(self) -> None:

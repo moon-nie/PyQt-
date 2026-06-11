@@ -32,6 +32,13 @@ Gridloom/
     ├── loader.py             파일 I/O
     ├── selection.py          SelectionScope
     ├── qt_data_dialogs.py    VLOOKUP·조인·병합·결측채우기·그룹
+    ├── qt_analysis_panel.py  EDA 분석 탭 UI
+    ├── qt_analysis_worker.py 분석 백그라운드 QThread
+    ├── analysis.py           EDA 통계·차트 (PyQt 없음)
+    ├── chart_style.py        차트 스타일 load/save
+    ├── eda_report.py         HTML 리포트 (PyQt 없음)
+    ├── qt_chart_style_dialog.py
+    └── analysis_deps.py      분석 패키지 누락 검사
 ```
 
 ### 역할 비유
@@ -59,6 +66,23 @@ gridloom.pyw
             ├── loader.load_file / save_file
             └── operations.* (데이터 변환)
 ```
+
+---
+
+## 2-1. 분석 탭 (EDA)
+
+| 파일 | 역할 |
+|------|------|
+| `analysis.py` | 통계·차트 추천·상관·이상치 요약 (순수 pandas/numpy) |
+| `qt_analysis_panel.py` | 개요·단·이·다변량·결측·이상치 UI |
+| `qt_analysis_worker.py` | KNN·이상치 등 무거운 작업을 메인 스레드 밖에서 실행 |
+| `analysis_deps.py` | matplotlib/sklearn/scipy 설치 여부 |
+| `chart_style.py` | 차트 색·글자·격자 설정 (`~/.gridloom/chart_style.json`) |
+| `eda_report.py` | `build_eda_html(df)` — HTML 리포트 문자열 |
+
+- 가공 중 데이터 변경 시 `qt_app.py`는 `refresh_light()`만 호출하고, 분석 페이지일 때만 `refresh(charts=True)` 합니다.
+- 차트 색 변경은 `ChartStyle` + `MplCanvas.style_axes` 경유. 리포트는 `eda_report.py`에 pandas만 사용.
+- 새 분석 연산은 `operations.py`에 두고, UI는 `qt_analysis_panel.py`에서 `run_analysis_task`로 호출합니다.
 
 ---
 

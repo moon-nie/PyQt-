@@ -16,6 +16,7 @@ from PyQt6.QtWidgets import (
     QListWidget,
     QMessageBox,
     QPushButton,
+    QSpinBox,
     QSplitter,
     QTableWidget,
     QTableWidgetItem,
@@ -23,6 +24,8 @@ from PyQt6.QtWidgets import (
     QWidget,
 )
 
+from df_tool.analysis import knn_fill_preview
+from df_tool.analysis_deps import sklearn_available
 from df_tool.loader import FILE_DIALOG_TYPES, load_file
 from df_tool.operations import (
     FILL_NA_METHOD_LABELS,
@@ -747,7 +750,7 @@ class QtFillNaDialog(QDialog):
         self.setMinimumWidth(480)
         self._df = df
         self._column = column
-        self._result: tuple[str, str | None] | None = None
+        self._result: tuple[str, str | None, int | None] | None = None
         key = resolve_column_key(df, column)
         if key is None:
             raise ValueError(f"열 '{column}'이(가) 없습니다.")
@@ -794,6 +797,17 @@ class QtFillNaDialog(QDialog):
         self._constant_box.setLayout(const_row)
         layout.addWidget(self._constant_box)
 
+        knn_row = QHBoxLayout()
+        knn_row.addWidget(QLabel("이웃 수 (k):"))
+        self._knn_neighbors = QSpinBox()
+        self._knn_neighbors.setRange(1, 50)
+        self._knn_neighbors.setValue(5)
+        knn_row.addWidget(self._knn_neighbors)
+        knn_row.addStretch()
+        self._knn_box = QWidget()
+        self._knn_box.setLayout(knn_row)
+        layout.addWidget(self._knn_box)
+
         self.preview_label = QLabel("")
         self.preview_label.setWordWrap(True)
         self.preview_label.setStyleSheet(f"color: {COLORS['text_muted']};")
@@ -809,22 +823,53 @@ class QtFillNaDialog(QDialog):
         buttons.rejected.connect(self.reject)
         layout.addWidget(buttons)
 
-        self.method_combo.currentTextChanged.connect(self._update_constant_visibility)
+        self.method_combo.currentTextChanged.connect(self._update_option_visibility)
         self.method_combo.currentTextChanged.connect(self._update_preview)
         self.constant_entry.textChanged.connect(self._update_preview)
-        self._update_constant_visibility()
+        self._knn_neighbors.valueChanged.connect(self._update_preview)
+        self._update_option_visibility()
         self._update_preview()
 
     def _selected_method(self) -> str:
         idx = self.method_combo.currentIndex()
         return self._method_codes[idx] if 0 <= idx < len(self._method_codes) else "mode"
 
-    def _update_constant_visibility(self) -> None:
-        show = self._selected_method() == "constant"
-        self._constant_box.setVisible(show)
+    def _update_option_visibility(self) -> None:
+        method = self._selected_method()
+        self._constant_box.setVisible(method == "constant")
+        self._knn_box.setVisible(method == "knn")
 
     def _update_preview(self) -> None:
         method = self._selected_method()
+        if method == "mice":
+            if not sklearn_available():
+                self.preview_label.setStyleSheet(f"color: {COLORS['danger']};")
+                self.preview_label.setText("MICE에는 scikit-learn이 필요합니다.")
+                return
+            before, _, targets = knn_fill_preview(self._df, [self._column])
+            if not targets:
+                self.preview_label.setText("MICE: 숫자 열이 아니거나 결측이 없습니다.")
+                return
+            warn = "\n⚠ 대용량 — 반복 대체라 시간이 걸릴 수 있습니다." if len(self._df) > 3000 else ""
+            self.preview_label.setStyleSheet(f"color: {COLORS['text']};")
+            self.preview_label.setText(f"미리보기 — MICE: 결측 {before:,}개 → 0개 (반복 대체){warn}")
+            return
+        if method == "knn":
+            if not sklearn_available():
+                self.preview_label.setStyleSheet(f"color: {COLORS['danger']};")
+                self.preview_label.setText("KNN에는 scikit-learn이 필요합니다. pip install -r requirements.txt")
+                return
+            before, _, targets = knn_fill_preview(self._df, [self._column])
+            if not targets:
+                self.preview_label.setText("KNN: 숫자 열이 아니거나 결측이 없습니다.")
+                return
+            k = self._knn_neighbors.value()
+            warn = "\n⚠ 대용량 데이터 — 적용에 시간이 걸릴 수 있습니다." if len(self._df) > 5000 else ""
+            self.preview_label.setStyleSheet(f"color: {COLORS['text']};")
+            self.preview_label.setText(
+                f"미리보기 — KNN (k={k}): 결측 {before:,}개 → 0개 (모델 기반 대체){warn}"
+            )
+            return
         if method in ("ffill", "bfill"):
             self.preview_label.setText(
                 "미리보기: 인접한 값으로 빈 칸을 채웁니다. (맨 위/아래는 남을 수 있음)"
@@ -854,18 +899,22 @@ class QtFillNaDialog(QDialog):
     def _apply(self) -> None:
         method = self._selected_method()
         constant = self.constant_entry.text().strip() if method == "constant" else None
+        n_neighbors = self._knn_neighbors.value() if method == "knn" else None
         try:
-            if method == "constant":
+            if method in ("knn", "mice"):
+                if not sklearn_available():
+                    raise ValueError("scikit-learn이 설치되어 있지 않습니다.")
+            elif method == "constant":
                 compute_fill_na_scalar(self._series, method, constant=constant)
             elif method not in ("ffill", "bfill"):
                 compute_fill_na_scalar(self._series, method)
         except Exception as exc:
             QMessageBox.warning(self, "입력 오류", str(exc))
             return
-        self._result = (method, constant if method == "constant" else None)
+        self._result = (method, constant if method == "constant" else None, n_neighbors)
         self.accept()
 
-    def get_result(self) -> tuple[str, str | None] | None:
+    def get_result(self) -> tuple[str, str | None, int | None] | None:
         if self.exec() != QDialog.DialogCode.Accepted:
             return None
         return self._result
@@ -875,7 +924,7 @@ def qt_fill_na_dialog(
     parent: QWidget | None,
     df: pd.DataFrame,
     column: str,
-) -> tuple[str, str | None] | None:
+) -> tuple[str, str | None, int | None] | None:
     key = resolve_column_key(df, column)
     if key is None or count_nulls(df[key]) <= 0:
         QMessageBox.information(parent, "결측치 없음", f"'{column}' 열에 결측치가 없습니다.")
