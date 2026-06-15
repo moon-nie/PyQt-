@@ -129,6 +129,7 @@ python scripts/run_all_qa.py
 - [ ] int 열명·필터·정렬 후에도 동작하는가?
 - [ ] `run_all_qa` 통과했는가?
 - [ ] PyQt 다이얼로그를 Tk 대신 쓸 수 있는데 Tk를 쓰지 않았는가?
+- [ ] (배포 전) `python scripts/sync_mirror.py`로 `github_upload` 미러를 동기화했는가?
 
 ---
 

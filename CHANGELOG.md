@@ -1,5 +1,84 @@
 # Gridloom — 변경 기록
 
+## v0.8.17 (2026-06-15)
+
+### 자율 작업 기반 + QA 안전망 확장
+- [AGENTS.md](AGENTS.md) 신설 — AI 코딩 에이전트용 운영 규칙(불변식·표준 루프·금지 사항·환경). 담당자 없이도 같은 절차로 작업 가능
+- [CONTRIBUTING.md](CONTRIBUTING.md) 신설 — 사람 기여자용 5분 시작·기여 흐름·headless 테스트·미러 동기화·PR 체크리스트
+- `scripts/qa_viewer_smoke.py` 신설 — DataFrameViewer 검색 필터·클립보드 복사/붙여넣기 headless 검증, `run_all_qa` 7종으로 확대
+- README·PROJECT_MAP·REFACTORING_BACKLOG 문서 인덱스·백로그(#10·#11 완료, #12·#13 예정) 동기화
+- QA 7종 전체 통과(동작 변경 없음)
+
+---
+
+## v0.8.16 (2026-06-15)
+
+### 점진적 리팩토링 2차 (동작 보존)
+- QA 안전망 신설: `scripts/qa_mainwindow_smoke.py` — MainWindow 로드/적용/undo·결측 다이얼로그 미리보기·비동기 로드/KNN 적용을 headless 검증
+- 의존성 UI 게이트 일원화: `df_tool/qt_dependency.py`(`gate_widget`·`gate_combo_item`·`require`)로 활성/비활성+경고 통합
+- `qt_data_dialogs`: 참조 파일 로드/라벨 표시를 `_prompt_load_reference`·`_set_ref_file_label`로 공통화(VLOOKUP·조인·병합)
+- `operations.py` 도메인 분할: KNN/MICE → `ops_impute.py`, 이상치(IQR/Z/IF) → `ops_outliers.py` (operations에서 re-export해 import 경로 100% 호환, 순환 import 안전)
+- MainWindow 비동기 통합: `df_tool/qt_async.py`의 `AsyncPoller`로 파일 로드·결측 채우기 폴링 로직 일원화(stale 토큰 검사 보존)
+- 기술 부채 보드(`REFACTORING_BACKLOG.md`) #4·#6·#7·#8·#9 완료 반영
+- QA 6종 전체 통과(동작 변경 없음)
+
+---
+
+## v0.8.15 (2026-06-15)
+
+### 유지보수성·문서 정리 (기술 부채 1차)
+- 자동 진단으로 복잡도·중복·문서 불일치·결합도·테스트 공백·미러 부채 6축 점검
+- 초심자용 [ARCHITECTURE.md](ARCHITECTURE.md)(3층 구조·의존성 규칙·요청 흐름·용어사전) 신설
+- 기술 부채 추적용 [REFACTORING_BACKLOG.md](REFACTORING_BACKLOG.md)(애자일 점진 리팩토링 보드) 신설
+- 의존성/설치 안내 문구를 `analysis_deps.feature_requirement_message`로 단일화(4개 파일 하드코딩 제거)
+- `help_content.py`의 "40열 초과 시 보이는 열만" 구버전 설명을 네이티브 전체 가로 스크롤로 정정
+- `grid/model.py` `MAX_DATA_COLUMNS` 의미 주석화(10,000열 초과 전용 윈도우 페이지 크기)
+- `scripts/github_publish.py`가 `github_upload` 미러를 제외하도록 보강(중복 트리 업로드 방지)
+- `scripts/sync_mirror.py` 신설 — 본체를 SSOT로 `github_upload` 미러를 자동 동기화(`--check` 드라이런)하고, 어긋났던 미러를 본체 기준으로 일괄 동기화
+- 차트 보일러플레이트 정리: `MplCanvas.begin_chart()`/`finish_chart()` + `_sample_label_text()`로 `qt_analysis_panel`의 반복 코드 통합(동작 보존)
+- README·PROJECT_MAP 문서 인덱스에 신규 문서 연결, DEVELOPER_GUIDE 중복 행 정리, 코드 작성 규칙에 미러 동기화 단계 추가
+- QA 전체 통과(동작 변경 없음)
+
+---
+
+## v0.8.14 (2026-06-15)
+
+### 의존성 UX 후속 보강
+- scikit-learn/scipy 누락이 기본 차트 전체를 막지 않도록 차트 최소 의존성과 고급 분석 의존성 분리
+- KNN 미리보기는 scikit-learn 없이도 결측 개수 안내가 가능하므로 계속 활성화
+- 단변량 차트 옵션 재구성 후에도 scipy 누락 시 KDE 비활성 상태 유지
+- Isolation Forest 직접 실행 경로에 scikit-learn 선제 안내 추가
+- 결측 채우기 방식 목록도 scikit-learn 유무에 따라 KNN/MICE 포함 여부를 결정
+
+---
+
+## v0.8.13 (2026-06-15)
+
+### 분석 의존성 UX
+- scikit-learn이 없으면 PCA, KNN/MICE, Isolation Forest 관련 버튼·옵션을 비활성화
+- scipy가 없으면 단변량 KDE 차트 옵션을 비활성화
+- 결측 채우기 다이얼로그에서도 KNN/MICE 선택지를 비활성화하고 설치 안내 툴팁 표시
+- 분석 패널 smoke QA에 의존성 상태와 버튼 활성 상태 일치 검증 추가
+
+---
+
+## v0.8.12 (2026-06-15)
+
+### 넓은 표 스크롤 UX 정리
+- 추가 열 구간 스크롤바를 제거해 가로 스크롤바가 2개 보이던 문제 해결
+- 일반적인 넓은 표는 기본 표 가로 스크롤바 하나로 모든 열을 확인
+- 55열 데이터가 전체 55열로 노출되는 회귀 테스트 추가
+
+---
+
+## v0.8.11 (2026-06-15)
+
+### 넓은 표 탐색
+- 41열 이상 표에서 뒤쪽 열 접근성을 개선하기 위한 열 구간 탐색을 시도
+- v0.8.12에서 디자인 피드백을 반영해 기본 가로 스크롤 하나로 정리
+
+---
+
 ## v0.8.10 (2026-05-19)
 
 ### CS 예방 하드닝

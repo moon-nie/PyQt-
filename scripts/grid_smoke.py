@@ -111,6 +111,18 @@ def test_column_selection_context() -> None:
     app.processEvents()
 
 
+def test_wide_columns_use_native_horizontal_scroll() -> None:
+    app = QApplication.instance() or QApplication(sys.argv)
+    viewer = DataFrameViewer()
+    df = pd.DataFrame({f"c{i}": [i] for i in range(55)})
+    viewer.set_dataframe(df, new_session=True)
+    assert not viewer._use_col_window
+    assert viewer._model.columnCount() == 55
+    assert viewer._model.column_name_at(0) == "c0"
+    assert viewer._model.column_name_at(54) == "c54"
+    app.processEvents()
+
+
 def main() -> int:
     test_grid_model_int_columns()
     test_cell_edit_sync()
@@ -119,6 +131,7 @@ def main() -> int:
     test_header_context_menu()
     test_column_reorder()
     test_column_selection_context()
+    test_wide_columns_use_native_horizontal_scroll()
     print("grid_smoke: OK")
     return 0
 

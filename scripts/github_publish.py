@@ -33,6 +33,8 @@ SKIP_DIRS = {
     ".vscode",
     ".idea",
     "node_modules",
+    # 수동 웹 업로드용 미러. API 배포 시 중복 트리가 올라가지 않도록 제외한다.
+    "github_upload",
 }
 SKIP_FILES = {".DS_Store", "Thumbs.db", "github_publish.py"}
 

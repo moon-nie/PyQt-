@@ -1,14 +1,18 @@
 ﻿# Gridloom — 프로젝트 파일 지도
 
 > **목적:** 파일이 많아도 어디를 고치면 되는지 바로 찾기  
-> **PyQt** (`gridloom.pyw`) 기준 · v0.8.10
+> **PyQt** (`gridloom.pyw`) 기준 · v0.8.17
 
 | 함께 볼 문서 | 대상 |
 |--------------|------|
 | [README.md](README.md) | 문서 인덱스 |
+| [CONTRIBUTING.md](CONTRIBUTING.md) | 기여 가이드 (사람) |
+| [AGENTS.md](AGENTS.md) | AI 에이전트 운영 규칙 |
+| [ARCHITECTURE.md](ARCHITECTURE.md) | 아키텍처 한눈에 보기 (초심자) |
 | [SETUP_GUIDE.md](SETUP_GUIDE.md) | 설치·실행 |
 | [LEARNING_GUIDE.md](LEARNING_GUIDE.md) | 코드 공부 순서 |
 | [DEVELOPER_GUIDE.md](DEVELOPER_GUIDE.md) | 기능 추가 |
+| [REFACTORING_BACKLOG.md](REFACTORING_BACKLOG.md) | 기술 부채 추적 |
 | [CHANGELOG.md](CHANGELOG.md) | 변경 기록 |
 
 ---
@@ -27,8 +31,11 @@ Gridloom/
 │   ├── qa_operations_smoke.py
 │   ├── qa_analysis_smoke.py
 │   ├── qa_analysis_panel_smoke.py
+│   ├── qa_mainwindow_smoke.py
 │   ├── qa_loader_smoke.py
-│   └── grid_smoke.py
+│   ├── qa_viewer_smoke.py    표 Facade 검색·클립보드
+│   ├── grid_smoke.py
+│   └── sync_mirror.py        github_upload 미러 동기화
 │
 └── df_tool/
     ├── __init__.py           __version__
@@ -52,7 +59,11 @@ Gridloom/
     ├── chart_style.py        차트 색·레이아웃 설정 저장
     ├── eda_report.py         차트 포함 HTML EDA 리포트
     │
-    ├── operations.py         pandas 변환 SSOT
+    ├── operations.py         pandas 변환 SSOT (impute·outlier는 re-export)
+    ├── ops_impute.py         KNN·MICE 결측 대체 (sklearn)
+    ├── ops_outliers.py       이상치 탐지 IQR·Z·IsolationForest
+    ├── qt_dependency.py      의존성 UI 게이트(활성/비활성·경고)
+    ├── qt_async.py           백그라운드 Future 폴링 래퍼(AsyncPoller)
     ├── loader.py             load_file / save_file
     ├── performance.py        대용량·넓은 표 임계값
     ├── help_content.py       앱 도움말 텍스트
@@ -124,6 +135,8 @@ python scripts/run_all_qa.py
 - `qa_operations_smoke.py`
 - `qa_analysis_smoke.py`
 - `qa_analysis_panel_smoke.py`
+- `qa_mainwindow_smoke.py` — MainWindow 로드·undo + 결측 다이얼로그·비동기 경로
 - `qa_loader_smoke.py`
+- `qa_viewer_smoke.py` — DataFrameViewer 검색 필터·클립보드 복사/붙여넣기
 - `grid_smoke.py`
 

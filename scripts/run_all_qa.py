@@ -16,7 +16,9 @@ def main() -> int:
         "qa_operations_smoke.py",
         "qa_analysis_smoke.py",
         "qa_analysis_panel_smoke.py",
+        "qa_mainwindow_smoke.py",
         "qa_loader_smoke.py",
+        "qa_viewer_smoke.py",
         "grid_smoke.py",
     ]
     failed: list[str] = []

@@ -48,9 +48,8 @@ Gridloom/
 | `qt_app.py` | 홀 매니저 — 파일 열기·저장·undo·패널 |
 | `qt_viewer.py` | 테이블 — 표시·선택·우클릭·단축키 |
 | `operations.py` | 주방 — pandas 변환만 |
-| `qt_dialogs.py` | PyQt 공통 팝업 (확인·저장·도움말) |
+| `qt_dialogs.py` | PyQt 공통 팝업 (확인·저장·도움말·열 병합/분리 등 공통 폼) |
 | `qt_data_dialogs.py` | VLOOKUP·조인·병합·결측채우기·그룹 팝업 |
-| `qt_dialogs.py` | 열 병합·분리 등 공통 폼 다이얼로그 |
 | `grid/` | 표 엔진 — Qt 모델·뷰·헤더 |
 
 ---

@@ -74,6 +74,7 @@ from df_tool.qt_dialogs import (
     qt_select_column_dialog,
 )
 from df_tool.qt_analysis_panel import AnalysisPanel
+from df_tool.qt_async import AsyncPoller
 from df_tool.qt_panels import ActivityLogPanel, CodePanel, InfoPanel
 from df_tool.qt_theme import (
     app_stylesheet,
@@ -111,10 +112,9 @@ class MainWindow(QMainWindow):
         self._partial_load_limit: int | None = None
         self._pending_load_limit: int | None = None
         self._load_executor = ThreadPoolExecutor(max_workers=1, thread_name_prefix="gridloom-load")
-        self._load_future: Future | None = None
+        self._load_poller = AsyncPoller(poll_ms=40)
         self._work_executor = ThreadPoolExecutor(max_workers=1, thread_name_prefix="gridloom-work")
-        self._fill_future: Future | None = None
-        self._fill_context: tuple[int, str] | None = None
+        self._fill_poller = AsyncPoller(poll_ms=80)
         self._loading = False
         self._info_refresh_timer = QTimer(self)
         self._info_refresh_timer.setSingleShot(True)
@@ -591,17 +591,9 @@ class MainWindow(QMainWindow):
         def work() -> LoadedData:
             return load_file(path, sheet_name=sheet_name, nrows=nrows)
 
-        self._load_future = self._load_executor.submit(work)
-        QTimer.singleShot(40, self._poll_file_load)
+        self._load_poller.start(self._load_executor.submit(work), self._on_file_loaded)
 
-    def _poll_file_load(self) -> None:
-        if self._load_future is None:
-            return
-        if not self._load_future.done():
-            QTimer.singleShot(40, self._poll_file_load)
-            return
-        future = self._load_future
-        self._load_future = None
+    def _on_file_loaded(self, future: Future) -> None:
         try:
             loaded = future.result()
         except Exception as exc:
@@ -917,7 +909,7 @@ class MainWindow(QMainWindow):
         n_neighbors: int | None,
         message: str,
     ) -> None:
-        if self._fill_future is not None and not self._fill_future.done():
+        if self._fill_poller.busy:
             self._toast_warning("결측치 채우기 작업이 진행 중입니다.", detail="끝난 뒤 다시 시도하세요.")
             return
         token = self._data_token
@@ -927,33 +919,21 @@ class MainWindow(QMainWindow):
                 return fill_na_knn(df, [column], n_neighbors=n_neighbors or 5)
             return fill_na_mice(df, [column])
 
-        self._fill_context = (token, message)
-        self._fill_future = self._work_executor.submit(work)
+        def on_done(future: Future) -> None:
+            try:
+                new_df = future.result()
+            except Exception as exc:
+                self._toast_error("결측치 채우기 실패", str(exc) or type(exc).__name__)
+                return
+            if token != self._data_token:
+                self._set_status("데이터가 변경되어 결측치 채우기 결과를 적용하지 않았습니다.")
+                self._log_action("warning", "결측치 채우기 결과 폐기", "작업 중 데이터가 변경되었습니다.")
+                return
+            self._apply_dataframe(new_df, message=message)
+
+        self._fill_poller.start(self._work_executor.submit(work), on_done)
         self._set_status(f"{message} — 백그라운드 적용 중…", revert_after_ms=None)
         self._log_action("info", "결측치 채우기 시작", message)
-        QTimer.singleShot(80, self._poll_fill_missing)
-
-    def _poll_fill_missing(self) -> None:
-        if self._fill_future is None:
-            return
-        if not self._fill_future.done():
-            QTimer.singleShot(80, self._poll_fill_missing)
-            return
-        future = self._fill_future
-        context = self._fill_context
-        self._fill_future = None
-        self._fill_context = None
-        token, message = context if context is not None else (-1, "결측치 채우기")
-        try:
-            new_df = future.result()
-        except Exception as exc:
-            self._toast_error("결측치 채우기 실패", str(exc) or type(exc).__name__)
-            return
-        if token != self._data_token:
-            self._set_status("데이터가 변경되어 결측치 채우기 결과를 적용하지 않았습니다.")
-            self._log_action("warning", "결측치 채우기 결과 폐기", "작업 중 데이터가 변경되었습니다.")
-            return
-        self._apply_dataframe(new_df, message=message)
 
     def drop_na_rows(self) -> None:
         if not self._require_data() or self._loaded is None:
@@ -1110,10 +1090,8 @@ class MainWindow(QMainWindow):
         self.show_guide_doc("CODING_STANDARDS.md", "코드 작성 규칙")
 
     def closeEvent(self, event) -> None:  # noqa: N802
-        if self._load_future is not None and not self._load_future.done():
-            self._load_future.cancel()
-        if self._fill_future is not None and not self._fill_future.done():
-            self._fill_future.cancel()
+        self._load_poller.cancel()
+        self._fill_poller.cancel()
         self._load_executor.shutdown(wait=False, cancel_futures=True)
         self._work_executor.shutdown(wait=False, cancel_futures=True)
         event.accept()

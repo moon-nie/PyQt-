@@ -25,7 +25,7 @@ from df_tool.analysis import (
 from df_tool.analysis_deps import analysis_deps_message, sklearn_available
 from df_tool.analysis import compute_pca
 from df_tool.eda_report import build_eda_html
-from df_tool.operations import drop_outlier_rows, fill_na_knn, fill_na_mice
+from df_tool.operations import column_fill_na_methods, drop_outlier_rows, fill_na_knn, fill_na_mice
 from df_tool.chart_style import ChartStyle, reset_chart_style, save_chart_style
 from df_tool.performance import should_defer_analysis_charts
 
@@ -108,6 +108,9 @@ def main() -> int:
     assert should_defer_analysis_charts(100, 40) is True
     assert should_defer_analysis_charts(100, 10) is False
     assert analysis_deps_message() is None or isinstance(analysis_deps_message(), str)
+    fill_methods = column_fill_na_methods(df["age"])
+    assert ("knn" in fill_methods) == sklearn_available()
+    assert ("mice" in fill_methods) == sklearn_available()
 
     style = ChartStyle(color_primary="#aabbcc", title_override="테스트")
     save_chart_style(style)

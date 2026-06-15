@@ -16,6 +16,9 @@ class GridModel(QAbstractTableModel):
     dataframe_changed = pyqtSignal()
     cell_edited = pyqtSignal(object, str, str)
 
+    # 열 윈도우 "페이지 크기": 열 수가 COLUMN_WINDOW_THRESHOLD(10,000)를 넘는
+    # 극단적 표에서만 한 번에 이 개수만큼 보여 준다. 일반 표(<=10,000열)는
+    # 윈도우를 쓰지 않고 네이티브 가로 스크롤로 전체 열을 노출한다.
     MAX_DATA_COLUMNS = 40
 
     def __init__(self, parent=None) -> None:

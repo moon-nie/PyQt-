@@ -7,6 +7,7 @@ import pandas as pd
 from PyQt6.QtCore import QTimer
 from PyQt6.QtWidgets import QApplication
 
+from df_tool.analysis_deps import scipy_available, sklearn_available
 from df_tool.qt_analysis_panel import AnalysisPanel
 
 
@@ -28,6 +29,15 @@ def main() -> int:
     panel._tabs.setCurrentIndex(1)
     panel._draw_univariate()
     html_btn_exists = True
+    assert panel._pca_btn.isEnabled() == sklearn_available()
+    assert panel._knn_preview_btn.isEnabled()
+    assert panel._knn_apply_btn.isEnabled() == sklearn_available()
+    assert panel._mice_apply_btn.isEnabled() == sklearn_available()
+    kde_idx = panel._uni_chart.findData("kde")
+    if kde_idx >= 0:
+        kde_item = panel._uni_chart.model().item(kde_idx)
+        if kde_item is not None:
+            assert kde_item.isEnabled() == scipy_available()
 
     def _finish() -> None:
         assert panel._tabs.currentIndex() == 1

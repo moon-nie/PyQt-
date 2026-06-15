@@ -25,7 +25,7 @@ from PyQt6.QtWidgets import (
 )
 
 from df_tool.analysis import knn_fill_preview
-from df_tool.analysis_deps import sklearn_available
+from df_tool.analysis_deps import feature_requirement_message, sklearn_available
 from df_tool.loader import FILE_DIALOG_TYPES, load_file
 from df_tool.operations import (
     FILL_NA_METHOD_LABELS,
@@ -77,6 +77,29 @@ def _fill_table(table: QTableWidget, df: pd.DataFrame, columns: list[str]) -> No
         for col_idx, col in enumerate(columns):
             table.setItem(row_idx, col_idx, QTableWidgetItem(_cell_text(row.get(col))))
     table.resizeColumnsToContents()
+
+
+def _prompt_load_reference(parent, title: str = "참조 파일 선택"):
+    """파일 선택 다이얼로그 → load_file. 취소/실패 시 None(실패는 경고 표시).
+
+    VLOOKUP·조인·병합이 공유하는 참조 파일 로드 보일러플레이트.
+    """
+    filters = ";;".join(f"{label} ({pat})" for label, pat in FILE_DIALOG_TYPES)
+    path, _ = QFileDialog.getOpenFileName(parent, title, "", filters)
+    if not path:
+        return None
+    try:
+        return load_file(Path(path))
+    except Exception as exc:
+        QMessageBox.critical(parent, "파일 열기 실패", str(exc))
+        return None
+
+
+def _set_ref_file_label(label, loaded) -> None:
+    """불러온 참조 파일 정보를 라벨에 '이름 (n행 × m열)' 형식으로 표시."""
+    df = loaded.dataframe
+    label.setText(f"{loaded.path.name}  ({len(df):,}행 × {len(df.columns)}열)")
+    label.setStyleSheet(f"color: {COLORS['text']};")
 
 
 class QtVLookupDialog(QDialog):
@@ -182,19 +205,12 @@ class QtVLookupDialog(QDialog):
         self.new_name.textChanged.connect(self._schedule_preview)
 
     def _load_reference(self) -> None:
-        filters = ";;".join(f"{label} ({pat})" for label, pat in FILE_DIALOG_TYPES)
-        path, _ = QFileDialog.getOpenFileName(self, "참조 파일 선택", "", filters)
-        if not path:
-            return
-        try:
-            loaded = load_file(Path(path))
-        except Exception as exc:
-            QMessageBox.critical(self, "파일 열기 실패", str(exc))
+        loaded = _prompt_load_reference(self)
+        if loaded is None:
             return
         self._ref_df = loaded.dataframe
         cols = [str(c) for c in self._ref_df.columns]
-        self.file_label.setText(f"{loaded.path.name}  ({len(self._ref_df):,}행 × {len(cols)}열)")
-        self.file_label.setStyleSheet(f"color: {COLORS['text']};")
+        _set_ref_file_label(self.file_label, loaded)
         self.right_key.clear()
         self.return_col.clear()
         self.right_key.addItems(cols)
@@ -453,19 +469,12 @@ class QtMergeDialog(QDialog):
         _fill_table(self.preview_table, preview_df, real_cols)
 
     def _load_reference(self) -> None:
-        filters = ";;".join(f"{label} ({pat})" for label, pat in FILE_DIALOG_TYPES)
-        path, _ = QFileDialog.getOpenFileName(self, "참조 파일 선택", "", filters)
-        if not path:
-            return
-        try:
-            loaded = load_file(Path(path))
-        except Exception as exc:
-            QMessageBox.critical(self, "파일 열기 실패", str(exc))
+        loaded = _prompt_load_reference(self)
+        if loaded is None:
             return
         self._ref_df = loaded.dataframe
         cols = [str(c) for c in self._ref_df.columns]
-        self.file_label.setText(f"{loaded.path.name}  ({len(self._ref_df):,}행 × {len(cols)}열)")
-        self.file_label.setStyleSheet(f"color: {COLORS['text']};")
+        _set_ref_file_label(self.file_label, loaded)
         self.right_on.clear()
         self.right_on.addItems(cols)
         if cols:
@@ -619,14 +628,8 @@ class QtConcatDialog(QDialog):
         _fill_table(self.preview_table, preview_df, real_cols)
 
     def _add_file(self) -> None:
-        filters = ";;".join(f"{label} ({pat})" for label, pat in FILE_DIALOG_TYPES)
-        path, _ = QFileDialog.getOpenFileName(self, "병합할 파일 선택", "", filters)
-        if not path:
-            return
-        try:
-            loaded = load_file(Path(path))
-        except Exception as exc:
-            QMessageBox.critical(self, "파일 열기 실패", str(exc))
+        loaded = _prompt_load_reference(self, "병합할 파일 선택")
+        if loaded is None:
             return
         name = loaded.path.name
         label = f"{name} ({len(loaded.dataframe):,}행)"
@@ -786,6 +789,7 @@ class QtFillNaDialog(QDialog):
         for code in self._methods:
             self._method_codes.append(code)
             self.method_combo.addItem(FILL_NA_METHOD_LABELS.get(code, code))
+        self._sync_dependency_methods()
         layout.addWidget(self.method_combo)
 
         self.constant_label = QLabel("채울 값:")
@@ -819,6 +823,7 @@ class QtFillNaDialog(QDialog):
         ok_btn = buttons.button(QDialogButtonBox.StandardButton.Ok)
         if ok_btn is not None:
             ok_btn.setText("적용")
+        self._ok_btn = ok_btn
         buttons.accepted.connect(self._apply)
         buttons.rejected.connect(self.reject)
         layout.addWidget(buttons)
@@ -829,6 +834,17 @@ class QtFillNaDialog(QDialog):
         self._knn_neighbors.valueChanged.connect(self._update_preview)
         self._update_option_visibility()
         self._update_preview()
+
+    def _sync_dependency_methods(self) -> None:
+        if sklearn_available():
+            return
+        model = self.method_combo.model()
+        for idx, code in enumerate(self._method_codes):
+            if code in {"knn", "mice"} and hasattr(model, "item"):
+                item = model.item(idx)
+                if item is not None:
+                    item.setEnabled(False)
+                    item.setToolTip(feature_requirement_message("sklearn", inline=True))
 
     def _selected_method(self) -> str:
         idx = self.method_combo.currentIndex()
@@ -841,10 +857,12 @@ class QtFillNaDialog(QDialog):
 
     def _update_preview(self) -> None:
         method = self._selected_method()
+        if hasattr(self, "_ok_btn") and self._ok_btn is not None:
+            self._ok_btn.setEnabled(not (method in {"knn", "mice"} and not sklearn_available()))
         if method == "mice":
             if not sklearn_available():
                 self.preview_label.setStyleSheet(f"color: {COLORS['danger']};")
-                self.preview_label.setText("MICE에는 scikit-learn이 필요합니다.")
+                self.preview_label.setText(feature_requirement_message("sklearn", feature="MICE", inline=True))
                 return
             before, _, targets = knn_fill_preview(self._df, [self._column])
             if not targets:
@@ -857,7 +875,7 @@ class QtFillNaDialog(QDialog):
         if method == "knn":
             if not sklearn_available():
                 self.preview_label.setStyleSheet(f"color: {COLORS['danger']};")
-                self.preview_label.setText("KNN에는 scikit-learn이 필요합니다. pip install -r requirements.txt")
+                self.preview_label.setText(feature_requirement_message("sklearn", feature="KNN", inline=True))
                 return
             before, _, targets = knn_fill_preview(self._df, [self._column])
             if not targets:
