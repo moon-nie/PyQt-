@@ -32,13 +32,15 @@
 | 2 | `help_content`·문서 vs 실제 동작 불일치 정리 | ✅ 완료 | 낮음 | 보통 | 낮음 |
 | 10 | 자율 작업 핸드오프 문서(`AGENTS.md`·`CONTRIBUTING.md`) | ✅ 완료 | 낮음 | 높음 | 보통 |
 | 11 | DataFrameViewer 검색·클립보드 QA(`qa_viewer_smoke`) | ✅ 완료 | 낮음 | 보통 | 보통 |
+| 14 | Mac 그래프 한글 폰트 fallback 보강 | ✅ 완료 | 낮음 | 보통 | 낮음 |
+| 15 | 분석 개요 결측 그래프 가독성·크기 조절 | ✅ 완료 | 낮음 | 보통 | 낮음 |
 | 12 | 필터 결과 행 추출(퀵윈 기능) | ⏳ 대기 | 낮음 | 높음 | 보통 |
 | 13 | CodePanel·VLookup 다이얼로그 E2E QA 보강 | ⏳ 대기 | 낮음 | 보통 | 보통 |
 | 3 | `github_upload` 미러 동기화 부채(버전·grid UX 3버전 drift) | ✅ 완료 | 낮음 | 높음 | 보통 |
-| 4 | 의존성 **UI 게이트**(enable/disable+경고) 일원화 `DependencyGate` | ✅ 완료 | 낮음 | 보통 | 보통 |
+| 4 | 의존성 **UI 게이트**(enable/disable+경고) 일원화 `qt_dependency.py` | ✅ 완료 | 낮음 | 보통 | 보통 |
 | 5 | `AnalysisPanel` 차트 공통 헬퍼 추출(`begin_chart`/sample/draw) | ✅ 완료 | 보통 | 높음 | 보통 |
 | 6 | `qt_data_dialogs` 참조파일 로드·preview 공통 mixin | ✅ 완료 | 보통 | 보통 | 보통 |
-| 7 | `MainWindow` 비동기 패턴 통합(load/fill `AsyncJob`) | ✅ 완료 | 보통 | 보통 | 높음 |
+| 7 | `MainWindow` 비동기 패턴 통합(load/fill `AsyncPoller`) | ✅ 완료 | 보통 | 보통 | 높음 |
 | 8 | `operations.py` 도메인 분할(re-export 호환) | ✅ 완료 | 보통 | 높음 | 높음 |
 | 9 | MainWindow·다이얼로그 E2E QA 공백 보강 | ✅ 완료 | 낮음 | 높음 | 높음 |
 | L1 | (latent) >10,000열 윈도우 이동 UI 부재 | 📝 기록 | — | 낮음 | — |
@@ -143,6 +145,19 @@
 
 ### #13 — CodePanel·VLookup E2E QA 보강 ⏳
 - `CodePanel.execute` 샌드박스, VLookup 다이얼로그 preview/apply headless 스모크 추가.
+
+### #14 — Mac 그래프 한글 폰트 fallback 보강 ✅
+- ✅ `analysis.configure_matplotlib_font()`가 없는 폰트명을 무조건 지정하지 않고, `font_manager`로 실제 설치 폰트를 확인.
+- ✅ macOS 기본 후보(`AppleGothic`, `Apple SD Gothic Neo`)와 Noto/Nanum 계열을 우선 탐색.
+- ✅ `qa_analysis_smoke.py`에 rcParams 설정 검증 추가.
+- ✅ `SETUP_GUIDE.md`에 Mac 그래프 한글 네모(□) FAQ 추가.
+
+### #15 — 분석 개요 결측 그래프 가독성·크기 조절 ✅
+- ✅ 개요 탭의 표/결측 비율 그래프를 세로 splitter로 분리해 사용자가 높이를 조절 가능.
+- ✅ 그래프 figure 크기는 항목 수를 참고하되, 위젯 최소 높이는 낮게 유지해 사용자가 줄일 수 있게 조정.
+- ✅ 긴 열 이름은 축 라벨에서 말줄임 처리해 그래프 영역 침범 완화.
+- ✅ 좌측 여백·라벨 길이·tick padding을 줄여 그래프가 오른쪽으로 치우쳐 보이는 현상 완화.
+- ✅ `qa_analysis_panel_smoke.py`에 다수 결측 열 회귀 검증 추가.
 
 ### L1 — (latent) >10,000열 윈도우 이동 UI 부재 📝
 - 열 윈도우 이동 스크롤바 제거 후, 10,000열 초과 표는 첫 40열만 보일 수 있음(매우 드문 케이스).

@@ -103,6 +103,12 @@ def _readonly_item(text: str) -> QTableWidgetItem:
     return item
 
 
+def _truncate_chart_label(value: str, *, max_len: int = 14) -> str:
+    """차트 축 라벨이 너무 길어 그래프를 덮지 않도록 짧게 표시."""
+    text = str(value)
+    return text if len(text) <= max_len else f"{text[: max_len - 1]}…"
+
+
 class MplCanvas(FigureCanvas):
     def __init__(
         self,
@@ -447,15 +453,22 @@ class AnalysisPanel(QWidget):
     def _build_overview_tab(self) -> QWidget:
         page = QWidget()
         layout = QVBoxLayout(page)
+        splitter = QSplitter(Qt.Orientation.Vertical)
+        splitter.setChildrenCollapsible(False)
         self._overview_table = QTableWidget(0, 8)
         self._overview_table.setHorizontalHeaderLabels(
             ["컬럼", "종류", "타입", "결측", "결측%", "고유값", "평균", "표준편차"]
         )
         self._overview_table.horizontalHeader().setStretchLastSection(True)
         self._overview_table.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
-        layout.addWidget(self._overview_table, stretch=2)
-        self._overview_canvas = MplCanvas(page, self._chart_style, height=2.5)
-        layout.addWidget(self._overview_canvas, stretch=1)
+        splitter.addWidget(self._overview_table)
+        self._overview_canvas = MplCanvas(page, self._chart_style, height=3.8)
+        self._overview_canvas.setMinimumHeight(140)
+        self._overview_canvas.setToolTip("개요 표와 결측 비율 그래프 사이 경계선을 드래그해 높이를 조절할 수 있습니다.")
+        splitter.addWidget(self._overview_canvas)
+        splitter.setSizes([460, 300])
+        self._overview_splitter = splitter
+        layout.addWidget(splitter, stretch=1)
         return page
 
     def _build_univariate_tab(self) -> QWidget:
@@ -861,12 +874,16 @@ class AnalysisPanel(QWidget):
             return
         data = missing_summary(self._df)[:20]
         canvas = self._overview_canvas
+        current_height = canvas.height() if canvas.height() > 0 else 0
+        recommended_height = 220 if not data else min(430, max(240, 100 + len(data) * 14))
+        draw_height = current_height if current_height >= 140 else recommended_height
+        canvas.fig.set_size_inches(canvas.fig.get_size_inches()[0], draw_height / canvas.fig.dpi, forward=True)
         ax = canvas.begin_chart()
         st = self._chart_style
         if not data:
             ax.text(0.5, 0.5, "결측치 없음", ha="center", va="center", color=st.color_muted)
         else:
-            names = [d[0] for d in data]
+            names = [_truncate_chart_label(d[0]) for d in data]
             pcts = [d[2] for d in data]
             ax.barh(
                 names, pcts,
@@ -875,8 +892,11 @@ class AnalysisPanel(QWidget):
             ax.set_xlabel("결측 비율 (%)")
             self._set_chart_title(ax, "열별 결측 비율 (상위 20)")
             ax.invert_yaxis()
+            ax.tick_params(axis="y", labelsize=max(6, st.tick_font_size - 2), pad=2)
+            ax.margins(y=0.02)
             self._apply_axis_limits(ax, "uni", x_vals=pcts)
             self._format_numeric_axis(ax, axis="x")
+            canvas.fig.subplots_adjust(left=0.14, right=0.98, top=0.88, bottom=0.15)
         canvas.draw()
 
     def _selected_list_items(self, widget: QListWidget) -> list[str]:

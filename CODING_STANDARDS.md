@@ -94,7 +94,7 @@ QtHelpDialog(self, text).exec()
 
 - 내부 표현: `SelectionScope` (`df_tool/selection.py`)
 - Qt ↔ Scope 변환: `SelectionController` (`df_tool/grid/selection.py`)
-- 열 선택 후 우클릭 → **열 메뉴** (행 메뉴 아님) — Tk와 동일 UX
+- 열 선택 후 우클릭 → **열 메뉴** (행 메뉴 아님) — 기존 표 UX 유지
 
 ---
 
@@ -106,7 +106,9 @@ QtHelpDialog(self, text).exec()
 python scripts/run_all_qa.py
 ```
 
-가능하면 `scripts/grid_smoke.py`에 headless 검증 추가 (GUI 조작 없이).
+가능하면 변경 영역에 맞는 `scripts/qa_*_smoke.py`에 headless 검증을 추가합니다.
+예: 데이터 로직은 `qa_operations_smoke.py`, 분석 패널은 `qa_analysis_panel_smoke.py`,
+표 Facade는 `qa_viewer_smoke.py`, 표 엔진은 `grid_smoke.py`.
 
 ---
 
@@ -128,7 +130,7 @@ python scripts/run_all_qa.py
 - [ ] `_require_data()`로 빈 상태를 막았는가?
 - [ ] int 열명·필터·정렬 후에도 동작하는가?
 - [ ] `run_all_qa` 통과했는가?
-- [ ] PyQt 다이얼로그를 Tk 대신 쓸 수 있는데 Tk를 쓰지 않았는가?
+- [ ] 신규 팝업을 PyQt로 만들었는가? (Tk 레거시를 새로 추가하지 않음)
 - [ ] (배포 전) `python scripts/sync_mirror.py`로 `github_upload` 미러를 동기화했는가?
 
 ---

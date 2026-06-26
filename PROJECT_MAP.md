@@ -1,7 +1,7 @@
 ﻿# Gridloom — 프로젝트 파일 지도
 
 > **목적:** 파일이 많아도 어디를 고치면 되는지 바로 찾기  
-> **PyQt** (`gridloom.pyw`) 기준 · v0.8.17
+> **PyQt** (`gridloom.pyw`) 기준 · v0.8.21
 
 | 함께 볼 문서 | 대상 |
 |--------------|------|
@@ -12,6 +12,8 @@
 | [SETUP_GUIDE.md](SETUP_GUIDE.md) | 설치·실행 |
 | [LEARNING_GUIDE.md](LEARNING_GUIDE.md) | 코드 공부 순서 |
 | [DEVELOPER_GUIDE.md](DEVELOPER_GUIDE.md) | 기능 추가 |
+| [CODING_STANDARDS.md](CODING_STANDARDS.md) | 코드 작성 규칙 |
+| [MIGRATION_QT.md](MIGRATION_QT.md) | PyQt 전환 아카이브 |
 | [REFACTORING_BACKLOG.md](REFACTORING_BACKLOG.md) | 기술 부채 추적 |
 | [CHANGELOG.md](CHANGELOG.md) | 변경 기록 |
 
@@ -35,7 +37,8 @@ Gridloom/
 │   ├── qa_loader_smoke.py
 │   ├── qa_viewer_smoke.py    표 Facade 검색·클립보드
 │   ├── grid_smoke.py
-│   └── sync_mirror.py        github_upload 미러 동기화
+│   ├── github_publish.py     GitHub API 업로드(선택)
+│   └── sync_mirror.py        github_upload 미러 동기화(본체 전용, 미러에는 복사 안 됨)
 │
 └── df_tool/
     ├── __init__.py           __version__

@@ -10,6 +10,7 @@ from df_tool.analysis import (
     bivariate_numeric_correlation,
     bivariate_pair_info,
     column_kind,
+    configure_matplotlib_font,
     correlation_matrix,
     count_outlier_rows,
     eda_overview,
@@ -17,6 +18,7 @@ from df_tool.analysis import (
     nice_axis_limits,
     missing_summary,
     outlier_summary,
+    preferred_korean_matplotlib_font,
     suggest_bivariate_chart,
     suggest_univariate_chart,
     univariate_chart_options,
@@ -107,6 +109,17 @@ def main() -> int:
     assert should_defer_analysis_charts(9000, 10) is True
     assert should_defer_analysis_charts(100, 40) is True
     assert should_defer_analysis_charts(100, 10) is False
+
+    configure_matplotlib_font()
+    import matplotlib.pyplot as plt
+
+    preferred_font = preferred_korean_matplotlib_font()
+    assert plt.rcParams["axes.unicode_minus"] is False
+    if preferred_font:
+        assert preferred_font in plt.rcParams["font.sans-serif"]
+    else:
+        assert plt.rcParams["font.family"][0] == "DejaVu Sans"
+
     assert analysis_deps_message() is None or isinstance(analysis_deps_message(), str)
     fill_methods = column_fill_na_methods(df["age"])
     assert ("knn" in fill_methods) == sklearn_available()

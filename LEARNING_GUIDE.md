@@ -33,7 +33,7 @@ operations.py                    ← pandas로 실제 데이터 변경
 ```
 
 - **UI는 얇게**, **데이터 로직은 `operations.py`에만** — 이 한 문장이 프로젝트의 핵심입니다.
-- 기본 실행은 **PyQt6** (`gridloom.pyw`). Tk 버전(`gridloom_tk.pyw`)은 레거시입니다.
+- 기본 실행은 **PyQt6** (`gridloom.pyw`). Tk 스택은 v0.7.1 이후 제거되었습니다.
 
 ---
 
@@ -101,7 +101,7 @@ operations.py                    ← pandas로 실제 데이터 변경
 선택 상태를 **UI와 무관한** 공통 타입으로 표현합니다.
 
 - `cells`, `rows`, `columns`, `active_cell`
-- Tk viewer와 PyQt viewer가 같은 타입을 씁니다.
+- 표 엔진과 viewer facade가 같은 타입을 씁니다.
 
 ### 3-2. `GridModel`
 
@@ -114,7 +114,7 @@ operations.py                    ← pandas로 실제 데이터 변경
 
 ### 3-3. `DataFrameViewer` (Facade)
 
-Tk 시절 `viewer.py`와 **같은 public API**를 PyQt로 제공합니다.
+표 엔진(`grid/`)을 감싼 **PyQt Facade**입니다.
 
 - `set_dataframe`, `get_dataframe`, `get_selection`
 - 우클릭 메뉴, 단축키, 검색 필터는 여기서 연결
@@ -131,12 +131,14 @@ Tk 시절 `viewer.py`와 **같은 public API**를 PyQt로 제공합니다.
 
 변경 후 `on_change` → `MainWindow._apply_dataframe` → undo 스택에 push.
 
-### 3-5. PyQt vs Tk 다이얼로그
+### 3-5. PyQt 다이얼로그
 
-| 방식 | 언제 |
+| 파일 | 언제 |
 |------|------|
-| `qt_dialogs.py` | **신규·단순** 팝업 (확인, 입력, 도움말) |
+| `qt_dialogs.py` | 단순 팝업 (확인, 입력, 도움말) |
 | `qt_data_dialogs.py` | VLOOKUP, 조인, 병합, 결측채우기, 그룹 요약 |
+
+신규 다이얼로그는 모두 PyQt로 작성합니다. Tk 레거시 파일은 현재 저장소에 없습니다.
 
 ---
 
@@ -174,15 +176,17 @@ qt_viewer 툴바 버튼
 
 ## 5. 테스트로 확인하기
 
-```bash
-cd c:\Users\siic\Desktop\0519
-set PYTHONPATH=.
+```powershell
+cd "c:\Users\siic\Desktop\0519"
+$env:PYTHONPATH = "."
 python scripts/grid_smoke.py
 python scripts/run_all_qa.py
 ```
 
 - `grid_smoke.py` — GUI 없이 GridModel·헤더·열 재정렬 검증
-- `run_all_qa.py` — operations, loader, viewer 회귀 전체
+- `qa_viewer_smoke.py` — 검색 필터·클립보드 복사/붙여넣기 검증
+- `qa_mainwindow_smoke.py` — 로드·undo·비동기 결측 채우기 검증
+- `run_all_qa.py` — operations, analysis, analysis panel, main window, loader, viewer, grid 회귀 전체
 
 코드를 읽은 뒤 **테스트 파일**을 보면 「기대 동작」을 빠르게 확인할 수 있습니다.
 
@@ -192,8 +196,8 @@ python scripts/run_all_qa.py
 
 | 질문 | 답 |
 |------|-----|
-| `viewer.py` vs `qt_viewer.py`? | 기본은 `qt_viewer.py`. `viewer.py`는 Tk 레거시 |
-| `app.py` vs `qt_app.py`? | 기본은 `qt_app.py` |
+| `qt_viewer.py`는 무엇인가요? | 표 메뉴·단축키·선택을 담당하는 PyQt Facade |
+| `qt_app.py`는 무엇인가요? | 파일·undo·패널·전역 상태를 관리하는 메인 창 |
 | 열 이름이 `0`, `1`인데? | `resolve_column_key`가 int/str 모두 처리 |
 | 표가 안 바뀌어요 | `restructure=True` 필요한지 확인 |
 | 다이얼로그 후 크래시 | 메뉴에서 바로 열 때 `QTimer.singleShot(0, ...)` 패턴 |

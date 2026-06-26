@@ -224,8 +224,8 @@ QTimer.singleShot(0, lambda: self._open_my_dialog())
 
 ## 8. QA 체크리스트
 
-```bash
-set PYTHONPATH=.
+```powershell
+$env:PYTHONPATH = "."
 python scripts/run_all_qa.py
 ```
 
@@ -234,6 +234,7 @@ python scripts/run_all_qa.py
 - [ ] undo (Ctrl+Z)에 쌓이는가?
 - [ ] 필터/정렬 중에도 올바른 행/열 대상?
 - [ ] PyQt 다이얼로그로 할 수 있는데 Tk를 새로 추가하지 않았는가?
+- [ ] 변경 영역에 맞는 smoke(`qa_operations_smoke.py`, `qa_analysis_panel_smoke.py`, `qa_viewer_smoke.py`, `grid_smoke.py` 등)를 보강했는가?
 
 ---
 

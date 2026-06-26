@@ -446,20 +446,56 @@ def default_bivariate_pair(df: pd.DataFrame) -> tuple[str | None, str | None]:
     return None, None
 
 
+def _available_matplotlib_font_names() -> set[str]:
+    """Matplotlib이 실제로 찾을 수 있는 폰트 family 이름."""
+    from matplotlib import font_manager
+
+    return {font.name for font in font_manager.fontManager.ttflist}
+
+
+def preferred_korean_matplotlib_font() -> str | None:
+    """현재 OS에 설치된 한글 표시 가능성이 높은 Matplotlib 폰트 이름.
+
+    macOS에서는 `AppleGothic` 또는 `Apple SD Gothic Neo`, Windows에서는
+    `Malgun Gothic`, Linux에서는 Noto/Nanum 계열을 우선한다.
+    """
+    candidates = (
+        "AppleGothic",
+        "Apple SD Gothic Neo",
+        "Malgun Gothic",
+        "NanumGothic",
+        "Nanum Gothic",
+        "Noto Sans CJK KR",
+        "Noto Sans KR",
+        "Noto Sans CJK",
+        "Source Han Sans KR",
+        "Source Han Sans",
+    )
+    available = _available_matplotlib_font_names()
+    for family in candidates:
+        if family in available:
+            return family
+    return None
+
+
 def configure_matplotlib_font() -> None:
-    """한글 차트용 기본 폰트."""
+    """한글 차트용 기본 폰트.
+
+    Matplotlib은 없는 폰트 이름을 지정해도 즉시 예외를 내지 않고 나중에
+    렌더링 단계에서 fallback을 시도할 수 있다. 그래서 설치된 폰트를 먼저
+    font_manager로 확인한 뒤 지정한다. (macOS 한글 네모 표시 방지)
+    """
     import matplotlib.pyplot as plt
 
-    for family in ("Malgun Gothic", "AppleGothic", "NanumGothic", "DejaVu Sans"):
-        try:
-            plt.rcParams["font.family"] = family
-            plt.rcParams["axes.unicode_minus"] = False
-            plt.rcParams["font.size"] = 10
-            plt.rcParams["axes.titlesize"] = 12
-            plt.rcParams["axes.labelsize"] = 11
-            plt.rcParams["xtick.labelsize"] = 10
-            plt.rcParams["ytick.labelsize"] = 10
-            return
-        except Exception:
-            continue
+    family = preferred_korean_matplotlib_font()
+    if family:
+        plt.rcParams["font.family"] = "sans-serif"
+        plt.rcParams["font.sans-serif"] = [family, "DejaVu Sans"]
+    else:
+        plt.rcParams["font.family"] = "DejaVu Sans"
     plt.rcParams["axes.unicode_minus"] = False
+    plt.rcParams["font.size"] = 10
+    plt.rcParams["axes.titlesize"] = 12
+    plt.rcParams["axes.labelsize"] = 11
+    plt.rcParams["xtick.labelsize"] = 10
+    plt.rcParams["ytick.labelsize"] = 10

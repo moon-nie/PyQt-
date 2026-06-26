@@ -121,7 +121,7 @@ python scripts/sync_mirror.py            # 실제 동기화
 
 ### (4) 버전 + CHANGELOG (필요 시)
 
-- 사용자 동작·기능이 바뀌었으면 `df_tool/__init__.py`의 `__version__`(현재 `0.8.17`)과
+- 사용자 동작·기능이 바뀌었으면 `df_tool/__init__.py`의 `__version__`(현재 `0.8.21`)과
   [CHANGELOG.md](CHANGELOG.md)를 갱신합니다.
 - 순수 리팩토링(동작 보존)은 버전을 올리지 않아도 됩니다.
 

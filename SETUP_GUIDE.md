@@ -217,13 +217,33 @@ python gridloom.pyw
 
 ### Q. Mac에서 tkinter 관련 에러
 
-Python 공식 설치본을 쓰거나:
+현재 Gridloom은 PyQt6 전용이라 정상 실행 경로에서는 tkinter가 필요하지 않습니다.
+이 오류가 보이면 오래된 Tk 레거시 파일이나 예전 문서를 실행한 것일 가능성이 큽니다.
+
+- 현재 실행 파일: `python3 gridloom.pyw`
+- 설치/실행 절차: 이 문서의 Mac 섹션을 다시 따르세요.
+- 그래도 오류가 나면 터미널 출력 전체를 확인해 어떤 파일을 실행했는지 먼저 확인하세요.
+
+### Q. Mac에서 그래프 한글이 네모(□)로 보여요
+
+Matplotlib이 한글 폰트를 찾지 못하면 차트 제목·축 이름이 네모로 보일 수 있습니다.
+Gridloom은 실행 시 Mac 기본 한글 폰트(`AppleGothic`, `Apple SD Gothic Neo`)와
+Noto/Nanum 계열을 자동 탐색합니다.
+
+그래도 네모로 보이면 아래 중 하나를 설치한 뒤 **앱을 완전히 종료하고 다시 실행**하세요:
 
 ```bash
-brew install python-tk@3.12
+brew install --cask font-noto-sans-cjk
 ```
 
-(본인 Python 버전에 맞게)
+또는 Nanum 폰트를 설치한 뒤 다시 실행합니다. 터미널에서 아래로 현재 인식 폰트를 확인할 수 있습니다:
+
+```bash
+python3 - <<'PY'
+from df_tool.analysis import preferred_korean_matplotlib_font
+print(preferred_korean_matplotlib_font() or "한글 폰트 미감지")
+PY
+```
 
 ### Q. 설정/테마는 어디 저장되나요?
 

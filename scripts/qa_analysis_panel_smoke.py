@@ -4,7 +4,7 @@ from __future__ import annotations
 import sys
 
 import pandas as pd
-from PyQt6.QtCore import QTimer
+from PyQt6.QtCore import Qt, QTimer
 from PyQt6.QtWidgets import QApplication
 
 from df_tool.analysis_deps import scipy_available, sklearn_available
@@ -38,6 +38,18 @@ def main() -> int:
         kde_item = panel._uni_chart.model().item(kde_idx)
         if kde_item is not None:
             assert kde_item.isEnabled() == scipy_available()
+
+    wide_missing = pd.DataFrame(
+        {
+            f"긴_결측_컬럼_{idx:02d}_라벨_겹침_방지": [None, idx, None, idx + 1, None]
+            for idx in range(24)
+        }
+    )
+    holder["df"] = wide_missing
+    panel.refresh(charts=True, force_charts=True)
+    assert panel._overview_splitter.orientation() == Qt.Orientation.Vertical
+    assert panel._overview_canvas.minimumHeight() <= 160
+    assert panel._overview_canvas.fig.axes[0].get_position().x0 <= 0.16
 
     def _finish() -> None:
         assert panel._tabs.currentIndex() == 1
