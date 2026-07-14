@@ -7,6 +7,7 @@ import pandas as pd
 from PyQt6.QtCore import QItemSelectionModel, QEvent, QPoint, Qt, QTimer
 from PyQt6.QtGui import QAction, QGuiApplication, QKeySequence, QShortcut
 from PyQt6.QtWidgets import (
+    QAbstractButton,
     QApplication,
     QCheckBox,
     QComboBox,
@@ -158,6 +159,11 @@ class DataFrameViewer(QWidget):
         self.search_btn = QPushButton("검색")
         self.search_btn.clicked.connect(self._apply_filter_now)
         search_row.addWidget(self.search_btn)
+        self.extract_btn = QPushButton("결과 추출")
+        self.extract_btn.setEnabled(False)
+        self.extract_btn.setToolTip("검색으로 좁힌 행만 데이터로 남깁니다 (Ctrl+Z로 되돌리기)")
+        self.extract_btn.clicked.connect(self._extract_filtered_rows)
+        search_row.addWidget(self.extract_btn)
         reset_btn = QPushButton("보기 초기화")
         reset_btn.clicked.connect(self._reset_view)
         search_row.addWidget(reset_btn)
@@ -217,6 +223,11 @@ class DataFrameViewer(QWidget):
 
         self._table.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
         self._table.customContextMenuRequested.connect(self._show_context_menu)
+
+        # 왼쪽 위 코너 버튼 → Ctrl+A 와 동일 (도움말에 문서화된 UX)
+        corner = self._table.findChild(QAbstractButton)
+        if corner is not None:
+            corner.clicked.connect(self._select_all)
 
         self.search_entry.returnPressed.connect(self._apply_filter_now)
 
@@ -471,6 +482,7 @@ class DataFrameViewer(QWidget):
         if restructure:
             self._recompute_filtered_indices()
             self._sync_model(reset_sort=False)
+            self._update_page_label()
         else:
             self._model.replace_dataframe(df)
             self._table.refresh_column_headers()
@@ -712,7 +724,13 @@ class DataFrameViewer(QWidget):
         col_name = self._model.column_name_at(section)
         if col_name is None:
             return
-        if modifiers & Qt.KeyboardModifier.ControlModifier:
+        if modifiers & Qt.KeyboardModifier.ShiftModifier:
+            anchor = self._selection.anchor_column
+            if anchor is not None and self._selection.mode in {"column", "columns"}:
+                self._select_column_range(anchor, col_name)
+            else:
+                self._select_column(col_name)
+        elif modifiers & Qt.KeyboardModifier.ControlModifier:
             self._toggle_column_in_selection(col_name)
         else:
             self._select_column(col_name)
@@ -818,6 +836,20 @@ class DataFrameViewer(QWidget):
         else:
             self._select_column(column)
 
+    def _select_column_range(self, start_column: str, end_column: str) -> None:
+        """Shift+열 헤더 — 앵커 열부터 클릭 열까지 연속 선택."""
+        order = self._column_list()
+        try:
+            i0 = order.index(start_column)
+            i1 = order.index(end_column)
+        except ValueError:
+            self._select_column(end_column)
+            return
+        lo, hi = min(i0, i1), max(i0, i1)
+        self._select_columns(order[lo : hi + 1])
+        # 범위 선택 후에도 앵커는 시작 열로 유지(엑셀과 유사)
+        self._selection.anchor_column = start_column
+
     def _select_row(self, source_index: object) -> None:
         self._select_rows([source_index])
 
@@ -888,11 +920,14 @@ class DataFrameViewer(QWidget):
     def _update_page_label(self) -> None:
         if self._df is None:
             self.page_label.setText("")
+            self.extract_btn.setEnabled(False)
             return
         shown = len(self._display_row_indices())
         matched = len(self._filtered_indices)
         total = len(self._df)
-        if shown != matched and self._row_filter_active():
+        filter_active = self._row_filter_active()
+        self.extract_btn.setEnabled(filter_active and shown > 0)
+        if shown != matched and filter_active:
             parts = [f"{shown:,}행 표시 (검색 {matched:,} + 편집 {shown - matched:,}) / {total:,}행"]
         else:
             parts = [f"{shown:,} / {total:,}행 표시"]
@@ -904,6 +939,40 @@ class DataFrameViewer(QWidget):
             arrow = "▲" if self._sort_ascending else "▼"
             parts.append(f"정렬: {self._sort_column} {arrow}")
         self.page_label.setText(" · ".join(parts))
+
+    def _extract_filtered_rows(self) -> None:
+        """검색·필터로 보이는 행만 데이터로 남깁니다 (operations.extract_rows SSOT)."""
+        if self._df is None:
+            return
+        if not self._row_filter_active():
+            QMessageBox.information(
+                self,
+                "결과 추출",
+                "검색으로 행이 좁혀진 뒤에만 추출할 수 있습니다.",
+            )
+            return
+        indices = self._sorted_filtered_indices()
+        if not indices:
+            QMessageBox.information(self, "결과 추출", "추출할 행이 없습니다.")
+            return
+        n = len(indices)
+        total = len(self._df)
+        from df_tool.qt_dialogs import qt_confirm
+
+        if not qt_confirm(
+            self,
+            "결과 추출",
+            f"지금 보이는 {n:,}행만 남깁니다 (전체 {total:,}행).\n\n"
+            "나머지 행은 데이터에서 제거됩니다. Ctrl+Z로 되돌릴 수 있습니다.",
+            confirm_text="추출",
+        ):
+            return
+        from df_tool.operations import extract_rows
+
+        new_df = extract_rows(self._df, indices)
+        self.search_entry.clear()
+        self._filter_pinned_rows.clear()
+        self._apply_df(new_df, action=f"필터 결과 {n:,}행 추출", restructure=True)
 
     def _notify_change(self, *, action: str | None = None) -> None:
         if self.on_change and self._df is not None:

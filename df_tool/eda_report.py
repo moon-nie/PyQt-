@@ -16,6 +16,7 @@ from df_tool.analysis import (
     numeric_columns,
 )
 from df_tool.operations import resolve_column_key
+from df_tool.ui_fonts import html_body_font_css_stack
 
 
 def _html_table(headers: list[str], rows: list[list[str]]) -> str:
@@ -150,7 +151,7 @@ def build_eda_html(df: pd.DataFrame, *, title: str = "Gridloom EDA 리포트") -
 <meta charset="utf-8"/>
 <title>{escape(title)}</title>
 <style>
-body {{ font-family: "Malgun Gothic", "Segoe UI", sans-serif; margin: 24px; color: #1e293b; background: #f8fafc; }}
+body {{ font-family: {html_body_font_css_stack()}; margin: 24px; color: #1e293b; background: #f8fafc; }}
 h1 {{ color: #312e81; border-bottom: 2px solid #818cf8; padding-bottom: 8px; }}
 h2 {{ color: #4338ca; margin-top: 28px; }}
 .meta {{ color: #64748b; margin-bottom: 20px; }}

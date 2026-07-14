@@ -72,6 +72,36 @@ def test_search_filter(app: QApplication) -> None:
     assert restored == total, f"필터 해제 후 {total}행 복귀 기대, 실제 {restored}"
 
 
+def test_extract_filtered_rows(app: QApplication) -> None:
+    """검색으로 좁힌 뒤 결과 추출 → 보이는 행만 데이터로 남는지."""
+    viewer = DataFrameViewer()
+    viewer.set_dataframe(_make_df(), new_session=True)
+    assert not viewer.extract_btn.isEnabled(), "필터 없을 때 추출 버튼은 비활성"
+
+    viewer.search_entry.setText("서울")
+    viewer._apply_filter_now()
+    app.processEvents()
+    assert viewer.extract_btn.isEnabled(), "필터 활성 시 추출 버튼 활성"
+    assert viewer._model.rowCount() == 2
+
+    # 확인 다이얼로그 우회: operations 경로를 직접 호출하는 대신
+    # _extract_filtered_rows 의 핵심(필터 클리어 + extract_rows + _apply_df)을 재현
+    from df_tool.operations import extract_rows
+
+    indices = viewer._sorted_filtered_indices()
+    new_df = extract_rows(viewer._df, indices)
+    viewer.search_entry.clear()
+    viewer._filter_pinned_rows.clear()
+    viewer._apply_df(new_df, action="필터 결과 2행 추출", restructure=True)
+    app.processEvents()
+
+    out = viewer.get_dataframe()
+    assert out is not None and len(out) == 2, f"추출 후 2행 기대, 실제 {None if out is None else len(out)}"
+    assert out["city"].tolist() == ["서울", "서울"]
+    assert not viewer.extract_btn.isEnabled(), "추출 후 필터 해제 → 버튼 비활성"
+    assert viewer._model.rowCount() == 2
+
+
 def test_clipboard_copy(app: QApplication) -> None:
     """2x2 범위 복사 → 클립보드가 기대한 TSV 를 담는지.
 
@@ -88,6 +118,21 @@ def test_clipboard_copy(app: QApplication) -> None:
     app.processEvents()
     text = QGuiApplication.clipboard().text()
     assert text == "alpha\t서울\nbeta\t부산", f"복사 TSV 불일치: {text!r}"
+
+
+def test_corner_select_all(app: QApplication) -> None:
+    """왼쪽 위 코너 버튼 클릭 → 전체 셀 선택 (Ctrl+A 와 동일)."""
+    from PyQt6.QtWidgets import QAbstractButton
+
+    viewer = DataFrameViewer()
+    viewer.set_dataframe(_make_df(), new_session=True)
+    assert viewer._table.isCornerButtonEnabled(), "코너 버튼이 활성화되어 있어야 함"
+    corner = viewer._table.findChild(QAbstractButton)
+    assert corner is not None, "QTableCornerButton 을 찾지 못함"
+    corner.click()
+    app.processEvents()
+    n_selected = len(viewer._table.selectionModel().selectedIndexes())
+    assert n_selected == 4 * 3, f"전체 12셀 선택 기대, 실제 {n_selected}"
 
 
 def test_clipboard_paste(app: QApplication) -> None:
@@ -114,8 +159,10 @@ def main() -> int:
     app = QApplication.instance() or QApplication(sys.argv)
     test_set_get_roundtrip(app)
     test_search_filter(app)
+    test_extract_filtered_rows(app)
     test_clipboard_copy(app)
     test_clipboard_paste(app)
+    test_corner_select_all(app)
     print("qa_viewer_smoke: OK")
     return 0
 

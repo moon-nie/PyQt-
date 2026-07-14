@@ -112,6 +112,8 @@ Gridloom의 테스트는 **GUI를 직접 클릭하지 않고**(headless) 동작�
 | EDA 통계·분석 로직(`analysis.py`) | `scripts/qa_analysis_smoke.py` |
 | 분석 패널 UI | `scripts/qa_analysis_panel_smoke.py` |
 | 메인 창 로드·undo·다이얼로그 | `scripts/qa_mainwindow_smoke.py` |
+| CodePanel·VLookup 다이얼로그 | `scripts/qa_panels_dialogs_smoke.py` |
+| 크롤링 로직(`crawl.py`) | `scripts/qa_crawl_smoke.py` |
 | 파일 입출력(`loader.py`) | `scripts/qa_loader_smoke.py` |
 | 표 Facade(검색 필터·클립보드) | `scripts/qa_viewer_smoke.py` |
 | 표 엔진(GridModel·헤더·열 재정렬) | `scripts/grid_smoke.py` |

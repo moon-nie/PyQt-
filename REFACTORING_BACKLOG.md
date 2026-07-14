@@ -34,8 +34,9 @@
 | 11 | DataFrameViewer 검색·클립보드 QA(`qa_viewer_smoke`) | ✅ 완료 | 낮음 | 보통 | 보통 |
 | 14 | Mac 그래프 한글 폰트 fallback 보강 | ✅ 완료 | 낮음 | 보통 | 낮음 |
 | 15 | 분석 개요 결측 그래프 가독성·크기 조절 | ✅ 완료 | 낮음 | 보통 | 낮음 |
-| 12 | 필터 결과 행 추출(퀵윈 기능) | ⏳ 대기 | 낮음 | 높음 | 보통 |
-| 13 | CodePanel·VLookup 다이얼로그 E2E QA 보강 | ⏳ 대기 | 낮음 | 보통 | 보통 |
+| 12 | 필터 결과 행 추출(퀵윈 기능) | ✅ 완료 | 낮음 | 높음 | 보통 |
+| 13 | CodePanel·VLookup 다이얼로그 E2E QA 보강 | ✅ 완료 | 낮음 | 보통 | 보통 |
+| 16 | `window.json` 창 기하 저장·복원 (문서 정합) | ✅ 완료 | 낮음 | 보통 | 낮음 |
 | 3 | `github_upload` 미러 동기화 부채(버전·grid UX 3버전 drift) | ✅ 완료 | 낮음 | 높음 | 보통 |
 | 4 | 의존성 **UI 게이트**(enable/disable+경고) 일원화 `qt_dependency.py` | ✅ 완료 | 낮음 | 보통 | 보통 |
 | 5 | `AnalysisPanel` 차트 공통 헬퍼 추출(`begin_chart`/sample/draw) | ✅ 완료 | 보통 | 높음 | 보통 |
@@ -44,6 +45,10 @@
 | 8 | `operations.py` 도메인 분할(re-export 호환) | ✅ 완료 | 보통 | 높음 | 높음 |
 | 9 | MainWindow·다이얼로그 E2E QA 공백 보강 | ✅ 완료 | 낮음 | 높음 | 높음 |
 | L1 | (latent) >10,000열 윈도우 이동 UI 부재 | 📝 기록 | — | 낮음 | — |
+| 17 | Mac·크로스플랫폼 UI 폰트 SSOT (`ui_fonts.py`) | ✅ 완료 | 낮음 | 높음 | 낮음 |
+| C1 | 크롤링: 앱 내 로그인 브라우저(Playwright 등) | ⏳ 대기 | 높음 | 높음 | 높음 |
+| C2 | 크롤링: 규칙(프리셋) 저장·불러오기 | ⏳ 대기 | 낮음 | 보통 | 보통 |
+| C3 | 크롤링: JS 렌더 페이지(동적 HTML) 지원 | ⏳ 대기 | 높음 | 높음 | 높음 |
 
 범례: ✅ 완료 · 🔄 진행 중 · ⏳ 대기 · 📝 기록(관찰)
 
@@ -128,7 +133,7 @@
   - `QtFillNaDialog`: mean 미리보기/적용 버튼 활성, KNN 적용 버튼이 scikit-learn 설치 여부와 일치.
 - 이후 리팩토링(#4·#6·#8·#7)의 회귀 안전망으로 사용.
 - ✅ 검색/필터·클립보드는 #11 `qa_viewer_smoke.py`로 보강 완료.
-- 남은 공백: CodePanel·VLookup E2E → #13.
+- ✅ CodePanel·VLookup E2E는 #13 `qa_panels_dialogs_smoke.py`로 보강 완료.
 
 ### #10 — 자율 작업 핸드오프 문서 ✅
 - ✅ [AGENTS.md](AGENTS.md) — AI 에이전트용 불변식·표준 루프·금지 사항·환경.
@@ -137,14 +142,31 @@
 
 ### #11 — DataFrameViewer QA 보강 ✅
 - ✅ `scripts/qa_viewer_smoke.py` — set/get 라운드트립, 검색 필터, 클립보드 복사/붙여넣기(headless).
-- ✅ `run_all_qa.py`에 등록. QA 7종 전체 통과.
+- ✅ `run_all_qa.py`에 등록. (이후 #13에서 8종으로 확대)
 
-### #12 — 필터 결과 행 추출(퀵윈 기능) ⏳
-- 검색 필터로 좁힌 행만 새 시트/파일로 추출 — 사용자 활용성 높음.
-- 방향: `operations.py`에 `extract_rows(df, indices)` + `qt_app` 또는 viewer 메뉴 연결.
+### 순차 작업 계획 (2026-07-13)
 
-### #13 — CodePanel·VLookup E2E QA 보강 ⏳
-- `CodePanel.execute` 샌드박스, VLookup 다이얼로그 preview/apply headless 스모크 추가.
+| 순서 | ID | 작업 | SSOT | 완료 조건 |
+|------|----|------|------|-----------|
+| W1 | #12 | 필터 결과 행 추출 | `operations.extract_rows` → viewer `_apply_df` → undo | ✅ QA + help + CHANGELOG + `sync_mirror` |
+| W2 | #13 | CodePanel·VLookup E2E QA | 기존 패널/다이얼로그 경로 headless 호출 | ✅ `run_all_qa` 등록 + `sync_mirror` |
+| W3 | #16 | `window.json` 창 기하 persist | 읽기/쓰기 한 모듈 + `qt_app`만 적용 | ✅ 문서 정합 + QA 스모크 + `sync_mirror` |
+
+규칙: 한 번에 한 행만 완료. 매 행마다 **변경 → QA → sync_mirror → 버전/문서**.
+
+### #12 — 필터 결과 행 추출(퀵윈 기능) ✅
+- ✅ `operations.extract_rows(df, indices)` — copy 후 `loc` 순서 보존.
+- ✅ viewer `[결과 추출]` — 필터 활성 시에만 enable, 확인 후 `_apply_df`(undo 가능).
+- ✅ help·CHANGELOG·operations/viewer smoke QA.
+
+### #13 — CodePanel·VLookup E2E QA 보강 ✅
+- ✅ `scripts/qa_panels_dialogs_smoke.py` — CodePanel.execute 성공/오류, VLookup preview/apply(참조 DF 주입).
+- ✅ `run_all_qa.py`에 등록 (당시 QA 8종; 이후 crawl 등으로 확대).
+
+### #16 — `window.json` 창 기하 저장·복원 ✅
+- ✅ `df_tool/window_state.py` — load/save SSOT (`~/.gridloom/window.json`).
+- ✅ `qt_app` 시작 시 복원 · `closeEvent`에서 저장.
+- ✅ help·PROJECT_MAP·qa_mainwindow_smoke 라운드트립.
 
 ### #14 — Mac 그래프 한글 폰트 fallback 보강 ✅
 - ✅ `analysis.configure_matplotlib_font()`가 없는 폰트명을 무조건 지정하지 않고, `font_manager`로 실제 설치 폰트를 확인.
@@ -159,9 +181,19 @@
 - ✅ 좌측 여백·라벨 길이·tick padding을 줄여 그래프가 오른쪽으로 치우쳐 보이는 현상 완화.
 - ✅ `qa_analysis_panel_smoke.py`에 다수 결측 열 회귀 검증 추가.
 
+### #17 — Mac·크로스플랫폼 UI 폰트 SSOT ✅
+- ✅ `df_tool/ui_fonts.py` — UI/모노스페이스/HTML 스택 (PyQt 무관).
+- ✅ `qt_theme.app_stylesheet` · `monospace_qfont` · 코드/로그·디자인 설정·EDA HTML 적용.
+- ✅ `SETUP_GUIDE.md` UI 한글 FAQ · CHANGELOG v0.8.29.
+
 ### L1 — (latent) >10,000열 윈도우 이동 UI 부재 📝
 - 열 윈도우 이동 스크롤바 제거 후, 10,000열 초과 표는 첫 40열만 보일 수 있음(매우 드문 케이스).
 - 즉시 수정 대신 관찰. 실제 요구 시 키보드/메뉴 기반 오프셋 이동으로 대응.
+
+### C1~C3 — 크롤링 다음 단계 ⏳
+- C1: Cookie 붙여넣기 대신 앱에서 로그인 세션 확보(Playwright 등) — 의존성·보안 검토 필요.
+- C2: URL·selector·필드 매핑 프리셋 저장(`~/.gridloom/`).
+- C3: JS로만 그려지는 페이지 — 브라우저 렌더 후 HTML 추출.
 
 ---
 

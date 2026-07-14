@@ -184,9 +184,10 @@ python scripts/run_all_qa.py
 ```
 
 - `grid_smoke.py` — GUI 없이 GridModel·헤더·열 재정렬 검증
-- `qa_viewer_smoke.py` — 검색 필터·클립보드 복사/붙여넣기 검증
-- `qa_mainwindow_smoke.py` — 로드·undo·비동기 결측 채우기 검증
-- `run_all_qa.py` — operations, analysis, analysis panel, main window, loader, viewer, grid 회귀 전체
+- `qa_viewer_smoke.py` — 검색 필터·결과 추출·클립보드·코너 전체 선택
+- `qa_panels_dialogs_smoke.py` — CodePanel 실행·VLookup 미리보기/적용
+- `qa_mainwindow_smoke.py` — 로드·undo·비동기 결측·window.json
+- `run_all_qa.py` — operations·analysis·panel·main·panels_dialogs·loader·viewer·grid (8종)
 
 코드를 읽은 뒤 **테스트 파일**을 보면 「기대 동작」을 빠르게 확인할 수 있습니다.
 

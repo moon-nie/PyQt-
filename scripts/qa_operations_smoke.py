@@ -21,6 +21,7 @@ from df_tool.operations import (
     paste_cells,
     reorder_columns,
     resolve_column_key,
+    extract_rows,
     set_cell_value,
     sort_dataframe,
     vlookup,
@@ -122,6 +123,13 @@ def main() -> int:
 
     extended = insert_row_at_end(pdf, 1)
     assert len(extended) == 3
+
+    # extract_rows: 지정 행만 유지·순서 보존
+    src = pd.DataFrame({"city": ["서울", "부산", "서울", "대구"], "n": [1, 2, 3, 4]})
+    extracted = extract_rows(src, [0, 2])
+    assert list(extracted.index) == [0, 2]
+    assert extracted["city"].tolist() == ["서울", "서울"]
+    assert extract_rows(src, []).empty and list(extract_rows(src, []).columns) == ["city", "n"]
 
     print("qa_operations_smoke: OK")
     return 0

@@ -7,7 +7,7 @@ from typing import Callable
 
 import pandas as pd
 from PyQt6.QtCore import Qt
-from PyQt6.QtGui import QColor, QFont, QKeySequence, QShortcut
+from PyQt6.QtGui import QColor, QKeySequence, QShortcut
 from PyQt6.QtWidgets import (
     QComboBox,
     QFrame,
@@ -24,6 +24,7 @@ from PyQt6.QtWidgets import (
 
 from df_tool.operations import SELECTABLE_DTYPES, column_dtype_display, count_nulls
 from df_tool.performance import should_show_detailed_stats_by_default
+from df_tool.qt_theme import monospace_qfont
 from df_tool.theme import COLORS
 
 _KIND_LABEL = {
@@ -267,8 +268,7 @@ class CodePanel(QWidget):
 
         self.editor = QPlainTextEdit()
         self.editor.setPlainText(DEFAULT_CODE)
-        font = QFont("Consolas", 10)
-        self.editor.setFont(font)
+        self.editor.setFont(monospace_qfont(10))
         self.editor.setStyleSheet(
             f"background: {COLORS['code_bg']}; color: {COLORS['code_fg']}; border: 1px solid {COLORS['border_subtle']};"
         )
@@ -330,7 +330,7 @@ class ActivityLogPanel(QWidget):
 
         self.text = QPlainTextEdit()
         self.text.setReadOnly(True)
-        self.text.setFont(QFont("Consolas", 10))
+        self.text.setFont(monospace_qfont(10))
         layout.addWidget(self.text, stretch=1)
 
     def add(self, kind: str, message: str, detail: str | None = None) -> None:

@@ -102,7 +102,8 @@ python scripts/run_all_qa.py
 
 - `scripts/run_all_qa.py`는 아래 smoke 테스트를 순서대로 실행합니다(하나라도 실패하면 비정상 종료):
   `qa_operations_smoke.py` · `qa_analysis_smoke.py` · `qa_analysis_panel_smoke.py` ·
-  `qa_mainwindow_smoke.py` · `qa_loader_smoke.py` · `qa_viewer_smoke.py` · `grid_smoke.py`
+  `qa_mainwindow_smoke.py` · `qa_panels_dialogs_smoke.py` · `qa_loader_smoke.py` ·
+  `qa_viewer_smoke.py` · `qa_crawl_smoke.py` · `grid_smoke.py`
 - **QA를 통과하지 못한 변경은 "완료"가 아닙니다.**
 - 새 로직을 추가했다면 가능한 한 관련 `scripts/qa_*_smoke.py`에 headless 검증을 보강합니다.
 
@@ -121,7 +122,7 @@ python scripts/sync_mirror.py            # 실제 동기화
 
 ### (4) 버전 + CHANGELOG (필요 시)
 
-- 사용자 동작·기능이 바뀌었으면 `df_tool/__init__.py`의 `__version__`(현재 `0.8.21`)과
+- 사용자 동작·기능이 바뀌었으면 `df_tool/__init__.py`의 `__version__`(현재 `0.8.29`)과
   [CHANGELOG.md](CHANGELOG.md)를 갱신합니다.
 - 순수 리팩토링(동작 보존)은 버전을 올리지 않아도 됩니다.
 

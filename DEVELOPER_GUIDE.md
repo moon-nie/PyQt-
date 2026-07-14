@@ -29,10 +29,13 @@ Gridloom/
     │   └── selection.py      SelectionController
     │
     ├── operations.py         ★ pandas SSOT (UI import 금지)
+    ├── window_state.py       창 위치·크기 (window.json)
+    ├── crawl.py              정적 HTML CSS selector 크롤링
     ├── loader.py             파일 I/O
     ├── selection.py          SelectionScope
     ├── qt_data_dialogs.py    VLOOKUP·조인·병합·결측채우기·그룹
     ├── qt_analysis_panel.py  EDA 분석 탭 UI
+    ├── qt_crawl_panel.py     크롤링 탭 UI
     ├── qt_analysis_worker.py 분석 백그라운드 QThread
     ├── analysis.py           EDA 통계·차트 (PyQt 없음)
     ├── chart_style.py        차트 스타일 load/save
@@ -45,9 +48,12 @@ Gridloom/
 
 | 파일 | 역할 |
 |------|------|
-| `qt_app.py` | 홀 매니저 — 파일 열기·저장·undo·패널 |
-| `qt_viewer.py` | 테이블 — 표시·선택·우클릭·단축키 |
-| `operations.py` | 주방 — pandas 변환만 |
+| `qt_app.py` | 홀 매니저 — 파일 열기·저장·undo·패널·창 기하 |
+| `qt_viewer.py` | 테이블 — 표시·선택·우클릭·단축키·검색/결과 추출 |
+| `operations.py` | 주방 — pandas 변환만 (`extract_rows` 등) |
+| `window_state.py` | 창 위치·크기 JSON 저장/복원 (PyQt 없음) |
+| `crawl.py` | 정적 HTML 크롤링 (PyQt 없음) |
+| `qt_crawl_panel.py` | 크롤링 탭 UI |
 | `qt_dialogs.py` | PyQt 공통 팝업 (확인·저장·도움말·열 병합/분리 등 공통 폼) |
 | `qt_data_dialogs.py` | VLOOKUP·조인·병합·결측채우기·그룹 팝업 |
 | `grid/` | 표 엔진 — Qt 모델·뷰·헤더 |

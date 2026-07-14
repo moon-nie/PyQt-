@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 from PyQt6.QtCore import Qt
-from PyQt6.QtWidgets import QAbstractItemView, QHeaderView, QTableView
+from PyQt6.QtWidgets import QAbstractButton, QAbstractItemView, QHeaderView, QTableView
 
 from df_tool.grid.delegate import GridCellDelegate
 from df_tool.grid.header import GridHorizontalHeader, GridVerticalHeader
@@ -27,7 +27,11 @@ class GridView(QTableView):
         self.setAlternatingRowColors(True)
         self.setWordWrap(False)
         self.setShowGrid(False)
-        self.setCornerButtonEnabled(False)
+        # 행·열 헤더가 만나는 왼쪽 위 코너 — 클릭 시 전체 선택(엑셀과 동일)
+        self.setCornerButtonEnabled(True)
+        corner = self.findChild(QAbstractButton)
+        if corner is not None:
+            corner.setToolTip("전체 선택 (Ctrl+A)")
         self.verticalHeader().setDefaultSectionSize(30)
         self.verticalHeader().setSectionResizeMode(QHeaderView.ResizeMode.Fixed)
         self.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.Interactive)

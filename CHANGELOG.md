@@ -1,5 +1,87 @@
 # Gridloom — 변경 기록
 
+## v0.8.29 (2026-07-14)
+
+### Mac·크로스플랫폼 UI 폰트 (한글 깨짐 방지)
+- UI 전역 스타일·코드/로그 모노스페이스·EDA HTML 리포트 폰트를 OS별로 선택
+- SSOT: `df_tool/ui_fonts.py` (PyQt 무관) · Qt는 `qt_theme.monospace_qfont`
+- Mac: Apple SD Gothic Neo / Menlo · Windows: Segoe UI+맑은 고딕 / Consolas
+- 차트(Matplotlib) 한글은 기존 `analysis.configure_matplotlib_font` 유지
+
+---
+
+## v0.8.28 (2026-07-14)
+
+### 크롤링 파라미터 소스 · Cookie/attr 안내 · Shift 열 선택
+- 일괄 파라미터: **열린 표의 열** / **파일에서 불러오기** / 직접 입력
+- Cookie·attr(text/href/src) **도움말 버튼** 추가 (브라우저 로그인 Cookie 복사 방법 안내)
+- 표 **Shift+열 헤더**로 열 범위 다중 선택 (행과 동일 패턴)
+
+---
+
+## v0.8.27 (2026-07-14)
+
+### 크롤링 일괄(URL 패턴) + Cookie
+- **일괄 (URL 패턴)** 탭: `...?code={code}` 템플릿 + 종목코드 목록 + 다중 열 매핑(`열|selector|attr`)
+- 요청 간격·최대 건수 조절, 행마다 `error` 열로 실패 기록
+- 선택적 **Cookie** 헤더(브라우저 세션 붙여넣기) — 로그인 필요 페이지용 경량 지원
+- `crawl_batch` / `parse_param_list` / `parse_fields_text` / `render_url_template` SSOT
+- 예: [네이버 증권 종목](https://finance.naver.com/item/main.naver?code=005930)처럼 code만 바꿔 여러 종목 수집
+
+---
+
+## v0.8.26 (2026-07-14)
+
+### 크롤링 구조 스캔
+- URL만 넣고 **[구조 스캔]** 하면 반복 목록(형제 블록) 후보를 점수순으로 제안
+- 후보 클릭 시 CSS selector·추천 속성(text/href) 자동 채움 후 미리보기 실행
+- 로직: `crawl.scan_structure` / `scan_url_structure` (PyQt 없음)
+- `qa_crawl_smoke`에 구조 스캔 회귀 검증 추가
+
+---
+
+## v0.8.25 (2026-07-13)
+
+### 크롤링 탭 MVP
+- 네비에 **크롤링** 탭 추가 (가공 · 분석 · 크롤링 · 작업 로그)
+- URL + CSS selector(DevTools Copy selector) + 추출 속성(text/href/src)으로 정적 HTML 수집
+- **미리보기** 후 **표로 가져오기** → 가공 탭 DataFrame으로 로드·편집·저장 가능
+- 로직 SSOT: `df_tool/crawl.py` (PyQt 없음) · UI: `qt_crawl_panel.py` · 네트워크는 AsyncPoller
+- `qa_crawl_smoke.py` 추가 (로컬 HTML, 네트워크 없음)
+
+---
+
+## v0.8.24 (2026-07-13)
+
+### 창 위치·크기 기억
+- 종료 시 `~/.gridloom/window.json`에 위치·크기·최대화 여부를 저장하고, 다음 실행 때 복원
+- 읽기/쓰기는 `window_state.py` 단일 출처(SSOT), UI는 `qt_app`만 적용
+- 문서에만 있던 `window.json` 안내와 실제 동작을 맞춤
+
+---
+
+## v0.8.23 (2026-07-13)
+
+### 필터 결과 행 추출
+- 검색으로 좁힌(표에 보이는) 행만 데이터로 남기는 **[결과 추출]** 버튼 추가
+- pandas 변환은 `operations.extract_rows` 단일 출처(SSOT), UI는 확인 후 `_apply_df` — Ctrl+Z로 되돌리기 가능
+- `qa_operations_smoke`·`qa_viewer_smoke`에 추출 경로 회귀 검증 추가
+- 도움말(검색 섹션)에 결과 추출 안내 반영
+
+### 개발/QA
+- `qa_panels_dialogs_smoke.py` 추가 — CodePanel 실행·VLookup 미리보기/적용 headless 검증 (`run_all_qa` 8종)
+
+---
+
+## v0.8.22 (2026-07-13)
+
+### 표 왼쪽 위 코너 클릭으로 전체 선택
+- 행 번호·열 헤더가 만나는 왼쪽 최상단(코너)을 클릭하면 Ctrl+A와 동일하게 전체 셀이 선택됨
+- 도움말에 이미 안내돼 있었으나 코너 버튼이 비활성화되어 있던 UX 공백을 맞춤
+- `qa_viewer_smoke.py`에 코너 클릭 → 전체 선택 회귀 검증 추가
+
+---
+
 ## v0.8.21 (2026-06-26)
 
 ### 분석 개요 그래프 좌측 정렬 보정

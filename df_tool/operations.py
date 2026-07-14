@@ -213,6 +213,14 @@ def delete_rows(df: pd.DataFrame, indices) -> pd.DataFrame:
     return result.drop(index=drop_idx)
 
 
+def extract_rows(df: pd.DataFrame, indices) -> pd.DataFrame:
+    """지정한 행만 남긴 새 DataFrame을 반환합니다 (요청 순서·원본 인덱스 유지)."""
+    keys = resolve_index_keys(df, list(indices))
+    if not keys:
+        return df.iloc[0:0].copy()
+    return df.loc[keys].copy()
+
+
 def delete_column(df: pd.DataFrame, column: str) -> pd.DataFrame:
     result = df.copy()
     key = resolve_column_key(result, column)

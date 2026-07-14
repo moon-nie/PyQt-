@@ -126,10 +126,24 @@ def _test_async_fill(app: QApplication, tmp: Path) -> None:
     window.close()
 
 
+def _test_window_state_roundtrip(tmp: Path) -> None:
+    from df_tool.window_state import load_window_state, save_window_state
+
+    path = tmp / "window.json"
+    assert load_window_state(path) is None
+    saved = save_window_state(x=40, y=50, width=1280, height=800, maximized=False, path=path)
+    assert saved == path
+    state = load_window_state(path)
+    assert state == {"x": 40, "y": 50, "width": 1280, "height": 800, "maximized": False}
+    # 너무 작은 크기는 거절
+    assert save_window_state(x=0, y=0, width=100, height=100, path=tmp / "bad.json") is None
+
+
 def main() -> int:
     app = QApplication(sys.argv)
     with tempfile.TemporaryDirectory() as d:
         tmp = Path(d)
+        _test_window_state_roundtrip(tmp)
         _test_mainwindow_lifecycle(tmp)
         _test_fillna_dialog_preview(tmp)
         _test_async_load(app, tmp)

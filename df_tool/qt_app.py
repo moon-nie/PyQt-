@@ -29,6 +29,7 @@ from PyQt6.QtWidgets import (
 
 from df_tool import __version__
 from df_tool.branding import APP_NAME, APP_TAGLINE
+from df_tool.window_state import load_window_state, save_window_state
 from df_tool.qt_data_dialogs import (
     qt_concat_dialog,
     qt_fill_na_dialog,
@@ -75,6 +76,7 @@ from df_tool.qt_dialogs import (
 )
 from df_tool.qt_analysis_panel import AnalysisPanel
 from df_tool.qt_async import AsyncPoller
+from df_tool.qt_crawl_panel import CrawlPanel
 from df_tool.qt_panels import ActivityLogPanel, CodePanel, InfoPanel
 from df_tool.qt_theme import (
     app_stylesheet,
@@ -125,6 +127,27 @@ class MainWindow(QMainWindow):
 
         self._build_ui()
         self._bind_shortcuts()
+        self._restore_window_geometry()
+
+    def _restore_window_geometry(self) -> None:
+        state = load_window_state()
+        if state is None:
+            return
+        self.resize(state["width"], state["height"])
+        self.move(state["x"], state["y"])
+        if state["maximized"]:
+            self.setWindowState(self.windowState() | Qt.WindowState.WindowMaximized)
+
+    def _persist_window_geometry(self) -> None:
+        # 최대화 중이면 normalGeometry로 복원 시 쓸 크기를 저장
+        geo = self.normalGeometry() if self.isMaximized() else self.geometry()
+        save_window_state(
+            x=geo.x(),
+            y=geo.y(),
+            width=geo.width(),
+            height=geo.height(),
+            maximized=self.isMaximized(),
+        )
 
     def _build_ui(self) -> None:
         central = QWidget()
@@ -207,10 +230,13 @@ class MainWindow(QMainWindow):
         self._nav_main_btn.clicked.connect(lambda: self._show_page("main"))
         self._nav_analysis_btn = nav_button("분석", active=False)
         self._nav_analysis_btn.clicked.connect(lambda: self._show_page("analysis"))
+        self._nav_crawl_btn = nav_button("크롤링", active=False)
+        self._nav_crawl_btn.clicked.connect(lambda: self._show_page("crawl"))
         self._nav_log_btn = nav_button("작업 로그", active=False)
         self._nav_log_btn.clicked.connect(lambda: self._show_page("log"))
         nav.addWidget(self._nav_main_btn)
         nav.addWidget(self._nav_analysis_btn)
+        nav.addWidget(self._nav_crawl_btn)
         nav.addWidget(self._nav_log_btn)
         nav.addStretch()
         root.addLayout(nav)
@@ -271,6 +297,14 @@ class MainWindow(QMainWindow):
         )
         self._stack.addWidget(self.analysis_panel)
 
+        self.crawl_panel = CrawlPanel(
+            on_import=self._apply_crawled_dataframe,
+            has_data=lambda: self._loaded is not None,
+            get_dataframe=lambda: self._loaded.dataframe if self._loaded else None,
+            on_log=self._log_action,
+        )
+        self._stack.addWidget(self.crawl_panel)
+
         self._activity_log = ActivityLogPanel()
         self._stack.addWidget(self._activity_log)
         self._show_page("main")
@@ -287,11 +321,13 @@ class MainWindow(QMainWindow):
         self._sync_mode_badges()
         style_nav_button(self._nav_main_btn, active=self._current_page == "main")
         style_nav_button(self._nav_analysis_btn, active=self._current_page == "analysis")
+        style_nav_button(self._nav_crawl_btn, active=self._current_page == "crawl")
         style_nav_button(self._nav_log_btn, active=self._current_page == "log")
         self.viewer.apply_theme()
         self.info_panel.apply_theme()
         self.code_panel.apply_theme()
         self.analysis_panel.apply_theme()
+        self.crawl_panel.apply_theme()
         self._activity_log.apply_theme()
 
     def _bind_shortcuts(self) -> None:
@@ -399,16 +435,35 @@ class MainWindow(QMainWindow):
 
     def _show_page(self, page: str) -> None:
         self._current_page = page
-        index = {"main": 0, "analysis": 1, "log": 2}.get(page, 0)
+        index = {"main": 0, "analysis": 1, "crawl": 2, "log": 3}.get(page, 0)
         self._stack.setCurrentIndex(index)
         style_nav_button(self._nav_main_btn, active=page == "main")
         style_nav_button(self._nav_analysis_btn, active=page == "analysis")
+        style_nav_button(self._nav_crawl_btn, active=page == "crawl")
         style_nav_button(self._nav_log_btn, active=page == "log")
         if page == "analysis":
             self.analysis_panel.refresh()
+        elif page == "crawl":
+            self.crawl_panel.refresh_data_columns()
 
     def _apply_analysis_result(self, df: pd.DataFrame, message: str) -> None:
         self._apply_dataframe(df, message=message)
+
+    def _apply_crawled_dataframe(self, df: pd.DataFrame, message: str) -> None:
+        """크롤링 결과를 새 세션으로 가공 탭에 로드합니다."""
+        if df is None or df.empty:
+            self._toast_warning("가져올 크롤링 결과가 없습니다.")
+            return
+        loaded = LoadedData(path=Path("crawled.csv"), dataframe=df.copy())
+        self._pending_prev_path = None
+        self._pending_sheet_name = None
+        self._pending_load_limit = None
+        self._apply_loaded_data(loaded, new_file=True)
+        self.path_label.setText("크롤링 결과")
+        self.setWindowTitle(f"{APP_NAME} — 크롤링 결과")
+        self._show_page("main")
+        self._set_status(f"{message} — {len(df):,}행 × {len(df.columns):,}열")
+        self._log_action("success", message, f"{len(df):,}행 × {len(df.columns):,}열")
 
     @staticmethod
     def _format_action_message(message: str) -> str:
@@ -1090,8 +1145,10 @@ class MainWindow(QMainWindow):
         self.show_guide_doc("CODING_STANDARDS.md", "코드 작성 규칙")
 
     def closeEvent(self, event) -> None:  # noqa: N802
+        self._persist_window_geometry()
         self._load_poller.cancel()
         self._fill_poller.cancel()
+        self.crawl_panel.shutdown()
         self._load_executor.shutdown(wait=False, cancel_futures=True)
         self._work_executor.shutdown(wait=False, cancel_futures=True)
         event.accept()

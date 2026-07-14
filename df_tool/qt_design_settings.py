@@ -22,6 +22,7 @@ from PyQt6.QtWidgets import (
 )
 
 from df_tool.theme import COLORS, DEFAULT_COLORS, THEME_GROUPS, save_theme_config
+from df_tool.ui_fonts import monospace_css_stack
 
 _DIALOG = {
     "bg": "#12151c",
@@ -66,7 +67,9 @@ class _ColorRowWidget(QFrame):
         title = QLabel(label)
         title.setStyleSheet(f"color: {d['text']}; font-weight: 600;")
         key_lbl = QLabel(key)
-        key_lbl.setStyleSheet(f"color: {d['text_muted']}; font-family: Consolas; font-size: 9pt;")
+        key_lbl.setStyleSheet(
+            f"color: {d['text_muted']}; font-family: {monospace_css_stack()}; font-size: 9pt;"
+        )
         top.addWidget(title)
         top.addStretch()
         top.addWidget(key_lbl)

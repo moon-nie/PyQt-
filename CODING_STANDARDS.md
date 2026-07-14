@@ -28,7 +28,7 @@
 | 복잡 PyQt 전용 UI | `df_tool/qt_*.py` | `qt_data_dialogs.py`, `qt_design_settings.py` |
 | 메인 창·파일·undo | `df_tool/qt_app.py` | `open_file`, `_apply_dataframe` |
 | 공통 타입 | `df_tool/selection.py` | `SelectionScope` |
-| 스타일 | `df_tool/qt_theme.py` + `theme.py` | `COLORS`, `app_stylesheet()` |
+| 스타일 | `df_tool/qt_theme.py` + `theme.py` + `ui_fonts.py` | `COLORS`, `app_stylesheet()`, OS별 폰트 |
 
 ---
 
@@ -84,7 +84,10 @@ QtHelpDialog(self, text).exec()
 ### 5-3. 스타일
 
 - 색상은 `theme.COLORS` 참조 — 하드코딩 `#fff` 지양
-- 전역 스타일: `qt_theme.app_stylesheet()`
+- 전역 스타일: `qt_theme.app_stylesheet()` (폰트 스택은 `ui_fonts.ui_font_css_stack`)
+- 코드/로그 모노스페이스: `qt_theme.monospace_qfont` (하드코딩 Consolas/Segoe UI 금지)
+- EDA HTML body 폰트: `ui_fonts.html_body_font_css_stack`
+- 차트 한글: `analysis.configure_matplotlib_font` (UI 폰트와 별도)
 - 위젯 개별: `setStyleSheet(f"... {COLORS['text']} ...")`
 - 테마 변경 후: `viewer.apply_theme()`, `info_panel.apply_theme()` 등 호출
 

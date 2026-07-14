@@ -1,7 +1,7 @@
 ﻿# Gridloom — 프로젝트 파일 지도
 
 > **목적:** 파일이 많아도 어디를 고치면 되는지 바로 찾기  
-> **PyQt** (`gridloom.pyw`) 기준 · v0.8.21
+> **PyQt** (`gridloom.pyw`) 기준 · v0.8.29
 
 | 함께 볼 문서 | 대상 |
 |--------------|------|
@@ -34,8 +34,10 @@ Gridloom/
 │   ├── qa_analysis_smoke.py
 │   ├── qa_analysis_panel_smoke.py
 │   ├── qa_mainwindow_smoke.py
+│   ├── qa_panels_dialogs_smoke.py  CodePanel·VLookup
 │   ├── qa_loader_smoke.py
-│   ├── qa_viewer_smoke.py    표 Facade 검색·클립보드
+│   ├── qa_viewer_smoke.py    검색·결과 추출·클립보드·코너 선택
+│   ├── qa_crawl_smoke.py     CSS selector 크롤링 로직
 │   ├── grid_smoke.py
 │   ├── github_publish.py     GitHub API 업로드(선택)
 │   └── sync_mirror.py        github_upload 미러 동기화(본체 전용, 미러에는 복사 안 됨)
@@ -43,8 +45,11 @@ Gridloom/
 └── df_tool/
     ├── __init__.py           __version__
     ├── branding.py           APP_NAME, 설정 경로
+    ├── window_state.py       창 위치·크기 (window.json)
+    ├── crawl.py              정적 HTML CSS selector 크롤링
     ├── theme.py              COLORS, theme.json
-    ├── qt_theme.py           공통 stylesheet
+    ├── ui_fonts.py           OS별 UI/HTML/모노스페이스 폰트 스택
+    ├── qt_theme.py           공통 stylesheet · monospace_qfont
     │
     ├── qt_app.py             메인 창, 파일·undo·네비게이션
     ├── qt_viewer.py          표 Facade
@@ -55,6 +60,7 @@ Gridloom/
     ├── qt_design_settings.py 앱 색상 설정
     │
     ├── qt_analysis_panel.py  EDA 분석 탭 UI
+    ├── qt_crawl_panel.py     크롤링 탭 UI
     ├── qt_analysis_worker.py 백그라운드 분석 작업(QThreadPool)
     ├── qt_chart_style_dialog.py  차트 꾸미기 다이얼로그
     ├── analysis.py           EDA 통계·차트 추천·PCA
@@ -108,6 +114,7 @@ gridloom.pyw
 | 결측 채우기(KNN/MICE) | `operations.py`, `qt_data_dialogs.py`, `qt_analysis_panel.py` |
 | EDA 통계·추천 | `analysis.py` |
 | 분석 탭 UI | `qt_analysis_panel.py` |
+| 크롤링 탭 | `crawl.py`, `qt_crawl_panel.py`, `qt_app.py` |
 | 이상치(IQR/Z/IF) | `operations.py`, `analysis.py`, `qt_analysis_panel.py` |
 | 차트 꾸미기 | `chart_style.py`, `qt_chart_style_dialog.py`, `qt_analysis_panel.py` |
 | HTML 리포트 | `eda_report.py`, `qt_analysis_panel.py` |
@@ -121,9 +128,9 @@ gridloom.pyw
 
 | 파일 | 위치 | 설명 |
 |------|------|------|
-| `theme.json` | `~/.gridloom/` | 앱 색상 |
+| `theme.json` | `~/.gridloom/` | 앱 색상·테마 |
+| `window.json` | `~/.gridloom/` | 창 위치·크기·최대화 (`window_state.py`) |
 | `chart_style.json` | `~/.gridloom/` | 분석 차트 색·레이아웃 |
-| `window.json` | `~/.gridloom/` | 창 상태 |
 
 ---
 
@@ -138,8 +145,10 @@ python scripts/run_all_qa.py
 - `qa_operations_smoke.py`
 - `qa_analysis_smoke.py`
 - `qa_analysis_panel_smoke.py`
-- `qa_mainwindow_smoke.py` — MainWindow 로드·undo + 결측 다이얼로그·비동기 경로
+- `qa_mainwindow_smoke.py` — MainWindow 로드·undo + 결측 다이얼로그·비동기·window.json
+- `qa_panels_dialogs_smoke.py` — CodePanel·VLookup
 - `qa_loader_smoke.py`
-- `qa_viewer_smoke.py` — DataFrameViewer 검색 필터·클립보드 복사/붙여넣기
+- `qa_viewer_smoke.py` — DataFrameViewer 검색 필터·결과 추출·클립보드·코너 전체 선택
+- `qa_crawl_smoke.py` — CSS selector 크롤링 (로컬 HTML)
 - `grid_smoke.py`
 

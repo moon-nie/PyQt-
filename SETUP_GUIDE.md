@@ -245,6 +245,18 @@ print(preferred_korean_matplotlib_font() or "한글 폰트 미감지")
 PY
 ```
 
+### Q. Mac에서 메뉴·버튼 한글이 깨지거나 네모로 보여요
+
+UI(메뉴·라벨·코드 패널)는 Windows 전용 글꼴만 쓰지 않고 OS별 스택을 씁니다.
+
+| 구분 | Mac | Windows |
+|------|-----|---------|
+| UI | Apple SD Gothic Neo / AppleGothic | Segoe UI / 맑은 고딕 |
+| 코드·로그 | Menlo | Consolas |
+| 차트 | `analysis` Matplotlib 후보 (위 FAQ) | 동일 후보 목록 |
+
+앱 UI는 보통 Mac 기본 한글 폰트로 표시됩니다. 그래도 깨지면 Noto Sans CJK를 설치한 뒤 앱을 다시 실행하세요.
+
 ### Q. 설정/테마는 어디 저장되나요?
 
 | OS | 경로 |
@@ -252,7 +264,7 @@ PY
 | Windows | `C:\Users\사용자이름\.gridloom\` |
 | Mac | `/Users/사용자이름/.gridloom/` |
 
-`theme.json`, `window.json` 등이 있습니다.
+`theme.json`(테마), `window.json`(창 위치·크기·최대화), `chart_style.json`(차트) 등이 있습니다.
 
 ### Q. Windows와 Mac에서 파일 호환?
 

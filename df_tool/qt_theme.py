@@ -1,18 +1,28 @@
 """PyQt6 공통 스타일 — theme.COLORS 기반."""
 from __future__ import annotations
 
+from PyQt6.QtGui import QFont
 from PyQt6.QtWidgets import QComboBox, QFrame, QLabel, QPushButton, QSizePolicy
 
 from df_tool.theme import COLORS
+from df_tool.ui_fonts import monospace_font_family, ui_font_css_stack
+
+
+def monospace_qfont(point_size: int = 10) -> QFont:
+    """코드/로그용 모노스페이스 (Mac=Menlo, Windows=Consolas, Linux=DejaVu)."""
+    font = QFont(monospace_font_family(), point_size)
+    font.setStyleHint(QFont.StyleHint.Monospace)
+    return font
 
 
 def app_stylesheet() -> str:
     c = COLORS
+    ui_font = ui_font_css_stack()
     return f"""
     QMainWindow, QWidget {{
         background: {c['bg']};
         color: {c['text']};
-        font-family: "Segoe UI", sans-serif;
+        font-family: {ui_font};
         font-size: 10pt;
     }}
     QPushButton {{
