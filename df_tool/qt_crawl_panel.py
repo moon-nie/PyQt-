@@ -31,16 +31,24 @@ from df_tool.crawl import (
     ALLOWED_ATTRS,
     StructureCandidate,
     crawl_batch,
+    crawl_to_dataframe,
     crawl_url_to_dataframe,
+    extract_fields,
     load_params_from_file,
+    merge_crawl_into_base,
     parse_fields_text,
     parse_param_list,
+    render_url_template,
     scan_url_structure,
     series_to_param_list,
 )
+from df_tool.analysis_deps import webengine_available
 from df_tool.qt_async import AsyncPoller
+from df_tool.qt_dependency import require
 from df_tool.qt_theme import card_frame_style, primary_button
 from df_tool.theme import COLORS
+
+_BROWSER_SETTLE_MS = 2500
 
 _BATCH_FIELDS_PLACEHOLDER = (
     "# 열이름|CSS selector|속성(생략 시 text)\n"
@@ -51,20 +59,20 @@ _BATCH_FIELDS_PLACEHOLDER = (
 )
 
 _COOKIE_HELP = """\
-Cookie는 ‘브라우저에 이미 로그인한 상태’를 요청에 실어 보내는 방법입니다.
+【추천】 로그인 브라우저
+1. [로그인 브라우저]를 엽니다.
+2. 사이트에 직접 로그인합니다.
+3. [세션(Cookie) 적용]을 누릅니다. Cookie 칸에 자동으로 채워집니다.
+4. 관리자·JS 페이지는 [브라우저 렌더 미리보기] / [브라우저로 일괄]을 사용하세요.
+   (일반 [미리보기]는 정적 HTML만 받아 SPA·관리자 화면이 비어 있을 수 있습니다.)
 
-【Chrome에서 복사하는 방법】
-1. 해당 사이트에 브라우저로 로그인합니다.
-2. F12 → Network(네트워크) 탭을 엽니다.
-3. 페이지를 새로고침한 뒤 목록에서 문서(document) 요청을 클릭합니다.
-4. Headers → Request Headers → Cookie 값을 전부 복사합니다.
-5. 여기 Cookie 칸에 붙여넣습니다.
+【수동】 Chrome에서 Cookie 복사
+1. 브라우저로 로그인 → F12 → Network → 문서 요청 → Cookie 복사 → Cookie 칸에 붙여넣기.
 
 【참고】
 • Cookie는 비밀번호처럼 다루세요. 공유·커밋하지 마세요.
-• 만료되면 다시 로그인 후 복사해야 합니다.
-• 앱 안에서 로그인 창을 띄우는 방식(브라우저 자동화)은 다음 단계에서
-  지원할 수 있습니다. 지금은 수동 Cookie가 가장 단순·안전합니다.
+• 세션은 ~/.gridloom/webengine/ 에 유지될 수 있습니다.
+• PyQt6-WebEngine 패키지가 필요합니다 (requirements.txt).
 """
 
 _ATTR_HELP = """\
@@ -94,19 +102,31 @@ class CrawlPanel(QWidget):
         on_import: Callable[[pd.DataFrame, str], None],
         has_data: Callable[[], bool],
         get_dataframe: Callable[[], pd.DataFrame | None] | None = None,
+        on_apply_merged: Callable[[pd.DataFrame, str], None] | None = None,
         on_log: Callable[[str, str, str | None], None] | None = None,
         parent: QWidget | None = None,
     ) -> None:
         super().__init__(parent)
         self.on_import = on_import
+        self.on_apply_merged = on_apply_merged
         self.has_data = has_data
         self.get_dataframe = get_dataframe or (lambda: None)
         self.on_log = on_log
         self._preview_df: pd.DataFrame | None = None
         self._candidates: list[StructureCandidate] = []
+        self._params_from_column: str | None = None
         self._executor = ThreadPoolExecutor(max_workers=1, thread_name_prefix="gridloom-crawl")
         self._poller = AsyncPoller(poll_ms=50)
+        self._we_profile = None
+        self._we_fetcher = None
+        self._browser_queue: list[tuple[str, str]] = []
+        self._browser_rows: list[dict[str, str]] = []
+        self._browser_fields = None
+        self._browser_param_key = "code"
         self._build_ui()
+        self._gate_webengine_buttons()
+        self._refresh_merge_left_columns()
+        self._on_import_mode_changed()
 
     def _build_ui(self) -> None:
         root = QVBoxLayout(self)
@@ -118,8 +138,8 @@ class CrawlPanel(QWidget):
         root.addWidget(title)
 
         hint = QLabel(
-            "단일 페이지 수집 · URL 패턴 일괄({code} 자리표시자) · 선택적 Cookie(로그인 세션).\n"
-            "정적 HTML만 지원합니다. 사이트 약관·robots·이용 제한을 지켜 주세요."
+            "로그인·JS 페이지: [로그인 브라우저] → [브라우저 렌더 미리보기] / [브라우저로 일괄].\n"
+            "공개 정적 HTML은 Cookie 없이 일반 미리보기로도 됩니다. 사이트 약관·robots를 지켜 주세요."
         )
         hint.setWordWrap(True)
         hint.setStyleSheet(f"color: {COLORS['text_secondary']};")
@@ -128,13 +148,21 @@ class CrawlPanel(QWidget):
         cookie_row = QHBoxLayout()
         cookie_row.addWidget(QLabel("Cookie(선택)"))
         self.cookie_edit = QLineEdit()
-        self.cookie_edit.setPlaceholderText("브라우저에서 복사한 Cookie — 로그인 필요 시")
+        self.cookie_edit.setPlaceholderText("로그인 브라우저로 적용 · 또는 수동 붙여넣기")
         self.cookie_edit.setEchoMode(QLineEdit.EchoMode.Password)
         cookie_row.addWidget(self.cookie_edit, stretch=1)
+        self.login_browser_btn = QPushButton("로그인 브라우저")
+        self.login_browser_btn.clicked.connect(self._open_login_browser)
+        cookie_row.addWidget(self.login_browser_btn)
         cookie_help_btn = QPushButton("Cookie 도움말")
         cookie_help_btn.clicked.connect(self._show_cookie_help)
         cookie_row.addWidget(cookie_help_btn)
         root.addLayout(cookie_row)
+
+        self.webengine_status = QLabel("")
+        self.webengine_status.setWordWrap(True)
+        self.webengine_status.setStyleSheet(f"color: {COLORS['warning']};")
+        root.addWidget(self.webengine_status)
 
         self.tabs = QTabWidget()
         self.tabs.addTab(self._build_single_tab(), "단일 페이지")
@@ -142,6 +170,21 @@ class CrawlPanel(QWidget):
         root.addWidget(self.tabs, stretch=1)
 
         btn_row = QHBoxLayout()
+        self.import_mode = QComboBox()
+        self.import_mode.addItem("크롤 결과로 교체", "replace")
+        self.import_mode.addItem("열린 표에 병합", "merge")
+        self.import_mode.setToolTip(
+            "교체: 가공 탭 표를 크롤 결과로 바꿉니다.\n"
+            "병합: 열린 표의 키 열과 크롤 파라미터 키를 맞춰 열을 붙입니다."
+        )
+        self.import_mode.currentIndexChanged.connect(self._on_import_mode_changed)
+        btn_row.addWidget(self.import_mode)
+        self.merge_left_col = QComboBox()
+        self.merge_left_col.setMinimumWidth(100)
+        self.merge_left_col.setToolTip("병합 시 열린 표의 키 열")
+        self.merge_left_col.setEnabled(False)
+        btn_row.addWidget(QLabel("키 열"))
+        btn_row.addWidget(self.merge_left_col)
         self.import_btn = primary_button("표로 가져오기")
         self.import_btn.clicked.connect(self._run_import)
         self.import_btn.setEnabled(False)
@@ -157,6 +200,12 @@ class CrawlPanel(QWidget):
         layout = QVBoxLayout(page)
         layout.setContentsMargins(4, 8, 4, 4)
         layout.setSpacing(8)
+
+        vsplit = QSplitter(Qt.Orientation.Vertical)
+        top = QWidget()
+        top_layout = QVBoxLayout(top)
+        top_layout.setContentsMargins(0, 0, 0, 0)
+        top_layout.setSpacing(8)
 
         form_wrap = QWidget()
         form_wrap.setStyleSheet(card_frame_style())
@@ -183,7 +232,7 @@ class CrawlPanel(QWidget):
 
         self.column_edit = QLineEdit("value")
         form.addRow("열 이름", self.column_edit)
-        layout.addWidget(form_wrap)
+        top_layout.addWidget(form_wrap)
 
         row = QHBoxLayout()
         self.scan_btn = QPushButton("구조 스캔")
@@ -192,8 +241,12 @@ class CrawlPanel(QWidget):
         self.preview_btn = QPushButton("미리보기")
         self.preview_btn.clicked.connect(self._run_preview)
         row.addWidget(self.preview_btn)
+        self.render_preview_btn = QPushButton("브라우저 렌더 미리보기")
+        self.render_preview_btn.clicked.connect(self._run_render_preview)
+        row.addWidget(self.render_preview_btn)
         row.addStretch()
-        layout.addLayout(row)
+        top_layout.addLayout(row)
+        vsplit.addWidget(top)
 
         splitter = QSplitter(Qt.Orientation.Horizontal)
         left = QWidget()
@@ -208,7 +261,7 @@ class CrawlPanel(QWidget):
         right = QWidget()
         right_layout = QVBoxLayout(right)
         right_layout.setContentsMargins(0, 0, 0, 0)
-        right_layout.addWidget(QLabel("미리보기"))
+        right_layout.addWidget(QLabel("미리보기 (구분선 드래그로 크기 조절)"))
         self.preview_table = QTableWidget(0, 1)
         self.preview_table.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
         self.preview_table.setAlternatingRowColors(True)
@@ -217,7 +270,11 @@ class CrawlPanel(QWidget):
         splitter.addWidget(right)
         splitter.setStretchFactor(0, 2)
         splitter.setStretchFactor(1, 3)
-        layout.addWidget(splitter, stretch=1)
+        vsplit.addWidget(splitter)
+        vsplit.setStretchFactor(0, 0)
+        vsplit.setStretchFactor(1, 1)
+        vsplit.setSizes([200, 400])
+        layout.addWidget(vsplit, stretch=1)
         return page
 
     def _build_batch_tab(self) -> QWidget:
@@ -249,10 +306,16 @@ class CrawlPanel(QWidget):
         form.addRow("요청 간격", self.batch_delay)
 
         self.batch_max = QSpinBox()
-        self.batch_max.setRange(1, 5_000)
-        self.batch_max.setValue(20)
+        self.batch_max.setRange(1, 50_000)
+        self.batch_max.setValue(100)
         form.addRow("최대 건수", self.batch_max)
         layout.addWidget(form_wrap)
+
+        vsplit = QSplitter(Qt.Orientation.Vertical)
+        mid_wrap = QWidget()
+        mid_layout = QVBoxLayout(mid_wrap)
+        mid_layout.setContentsMargins(0, 0, 0, 0)
+        mid_layout.setSpacing(8)
 
         mid = QSplitter(Qt.Orientation.Horizontal)
         params_box = QWidget()
@@ -271,6 +334,7 @@ class CrawlPanel(QWidget):
         self.param_column = QComboBox()
         self.param_column.setMinimumWidth(120)
         self.param_column.setEnabled(False)
+        self.param_column.currentIndexChanged.connect(self._sync_merge_left_from_param_col)
         src_row.addWidget(self.param_column)
         fill_btn = QPushButton("목록에 채우기")
         fill_btn.clicked.connect(self._fill_params_from_source)
@@ -299,27 +363,40 @@ class CrawlPanel(QWidget):
         mid.addWidget(fields_box)
         mid.setStretchFactor(0, 1)
         mid.setStretchFactor(1, 2)
-        layout.addWidget(mid, stretch=1)
+        mid_layout.addWidget(mid, stretch=1)
 
         row = QHBoxLayout()
         self.batch_run_btn = QPushButton("일괄 미리보기")
         self.batch_run_btn.clicked.connect(self._run_batch)
         row.addWidget(self.batch_run_btn)
+        self.batch_browser_btn = QPushButton("브라우저로 일괄")
+        self.batch_browser_btn.clicked.connect(self._run_batch_browser)
+        row.addWidget(self.batch_browser_btn)
         row.addStretch()
-        layout.addLayout(row)
+        mid_layout.addLayout(row)
+        vsplit.addWidget(mid_wrap)
 
+        bottom = QWidget()
+        bottom_layout = QVBoxLayout(bottom)
+        bottom_layout.setContentsMargins(0, 0, 0, 0)
+        bottom_layout.addWidget(QLabel("일괄 미리보기 (구분선 드래그로 표 높이 조절)"))
         self.batch_preview = QTableWidget(0, 0)
         self.batch_preview.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
         self.batch_preview.setAlternatingRowColors(True)
         self.batch_preview.horizontalHeader().setStretchLastSection(True)
-        layout.addWidget(self.batch_preview, stretch=1)
+        bottom_layout.addWidget(self.batch_preview, stretch=1)
+        vsplit.addWidget(bottom)
+        vsplit.setStretchFactor(0, 1)
+        vsplit.setStretchFactor(1, 1)
+        vsplit.setSizes([300, 340])
+        layout.addWidget(vsplit, stretch=1)
         return page
 
     def apply_theme(self) -> None:
         pass
 
     def refresh_data_columns(self) -> None:
-        """가공 탭 DF가 바뀔 때 파라미터용 열 콤보를 갱신합니다."""
+        """가공 탭 DF가 바뀔 때 파라미터용·병합 키 열 콤보를 갱신합니다."""
         current = self.param_column.currentText()
         self.param_column.blockSignals(True)
         self.param_column.clear()
@@ -332,7 +409,38 @@ class CrawlPanel(QWidget):
             idx = self.param_column.findText(current)
             if idx >= 0:
                 self.param_column.setCurrentIndex(idx)
+        self._refresh_merge_left_columns()
         self._on_param_source_changed()
+        self._on_import_mode_changed()
+
+    def _refresh_merge_left_columns(self) -> None:
+        current = self.merge_left_col.currentText()
+        prefer = self._params_from_column or self.param_column.currentText()
+        self.merge_left_col.blockSignals(True)
+        self.merge_left_col.clear()
+        df = self.get_dataframe()
+        if df is not None and not df.empty:
+            for col in df.columns:
+                self.merge_left_col.addItem(str(col))
+        self.merge_left_col.blockSignals(False)
+        for candidate in (prefer, current):
+            if candidate:
+                idx = self.merge_left_col.findText(str(candidate))
+                if idx >= 0:
+                    self.merge_left_col.setCurrentIndex(idx)
+                    break
+
+    def _sync_merge_left_from_param_col(self, *_args) -> None:
+        if self.param_source.currentData() == "dataframe":
+            text = self.param_column.currentText()
+            if text:
+                idx = self.merge_left_col.findText(text)
+                if idx >= 0:
+                    self.merge_left_col.setCurrentIndex(idx)
+
+    def _on_import_mode_changed(self, *_args) -> None:
+        merge = self.import_mode.currentData() == "merge"
+        self.merge_left_col.setEnabled(merge and self.merge_left_col.count() > 0)
 
     def cancel_pending(self) -> None:
         self._poller.cancel()
@@ -346,6 +454,64 @@ class CrawlPanel(QWidget):
 
     def _show_attr_help(self) -> None:
         QMessageBox.information(self, "attr(추출 속성) 안내", _ATTR_HELP)
+
+    def _gate_webengine_buttons(self) -> None:
+        """WebEngine 없으면 버튼은 켜 두고, 클릭 시 설치 안내를 띄운다.
+
+        비활성만 하면 사용자가 원인을 확인할 수 없어 버튼을 계속 클릭 가능하게 둔다.
+        """
+        from df_tool.analysis_deps import feature_requirement_message
+
+        ok = webengine_available()
+        tip = "" if ok else feature_requirement_message(
+            "PyQt6.QtWebEngineWidgets", feature="로그인 브라우저", inline=True
+        )
+        for btn in (self.login_browser_btn, self.render_preview_btn, self.batch_browser_btn):
+            btn.setEnabled(True)
+            btn.setToolTip(tip)
+        if ok:
+            self.webengine_status.setText("")
+        else:
+            self.webengine_status.setText(
+                "로그인 브라우저를 쓰려면 PyQt6-WebEngine이 필요합니다. "
+                "버튼을 누르면 설치 안내가 나옵니다. → pip install PyQt6-WebEngine"
+            )
+
+    def _ensure_webengine(self) -> bool:
+        if not require(
+            self,
+            webengine_available(),
+            "PyQt6.QtWebEngineWidgets",
+            feature="로그인 브라우저",
+        ):
+            return False
+        if self._we_profile is None:
+            from df_tool.qt_webengine_crawl import (
+                RenderedHtmlFetcher,
+                crawl_webengine_profile,
+                ensure_webengine_imported,
+            )
+
+            ensure_webengine_imported()
+            self._we_profile = crawl_webengine_profile(self)
+            self._we_fetcher = RenderedHtmlFetcher(self._we_profile, self)
+        return True
+
+    def _open_login_browser(self) -> None:
+        if not self._ensure_webengine():
+            return
+        from df_tool.qt_webengine_crawl import LoginBrowserDialog
+
+        start = self.url_edit.text().strip()
+        if not start:
+            tpl = self.batch_template.text().strip()
+            start = tpl.split("{")[0] if tpl else "https://"
+        dlg = LoginBrowserDialog(start, profile=self._we_profile, parent=self)
+        if dlg.exec() == dlg.DialogCode.Accepted and dlg.cookie_header:
+            self.cookie_edit.setText(dlg.cookie_header)
+            self.status_label.setText("로그인 세션(Cookie) 적용됨")
+            if self.on_log:
+                self.on_log("info", "크롤링 로그인 세션", "Cookie 적용")
 
     def _on_param_source_changed(self, *_args) -> None:
         source = self.param_source.currentData()
@@ -381,7 +547,10 @@ class CrawlPanel(QWidget):
                 QMessageBox.warning(self, "파라미터", "선택한 열에 쓸 값이 없습니다.")
                 return
             self.batch_params.setPlainText("\n".join(values))
-            self.status_label.setText(f"열린 표 '{col}'에서 {len(values):,}개 채움")
+            self._params_from_column = str(col)
+            self._refresh_merge_left_columns()
+            self.import_mode.setCurrentIndex(self.import_mode.findData("merge"))
+            self.status_label.setText(f"열린 표 '{col}'에서 {len(values):,}개 채움 · 가져오기=병합 권장")
             return
 
         # file
@@ -403,6 +572,7 @@ class CrawlPanel(QWidget):
             return
         self.batch_params.setPlainText("\n".join(values))
         self.param_source.setCurrentIndex(self.param_source.findData("manual"))
+        self._params_from_column = None
         self.status_label.setText(f"파일에서 {len(values):,}개 채움")
 
     def _cookie(self) -> str | None:
@@ -410,9 +580,18 @@ class CrawlPanel(QWidget):
         return text or None
 
     def _set_busy(self, busy: bool, message: str) -> None:
-        self.scan_btn.setEnabled(not busy)
-        self.preview_btn.setEnabled(not busy)
-        self.batch_run_btn.setEnabled(not busy)
+        # 로그인 브라우저는 busy와 무관하게 유지 (세션 잡기 / 설치 안내)
+        for btn in (
+            self.scan_btn,
+            self.preview_btn,
+            self.render_preview_btn,
+            self.batch_run_btn,
+            self.batch_browser_btn,
+        ):
+            btn.setEnabled(not busy)
+        if not busy:
+            self._gate_webengine_buttons()
+        self.login_browser_btn.setEnabled(True)
         self.import_btn.setEnabled(
             not busy and self._preview_df is not None and not self._preview_df.empty
         )
@@ -534,6 +713,49 @@ class CrawlPanel(QWidget):
         if self.on_log:
             self.on_log("info", "크롤링 미리보기", f"{len(df):,}행")
 
+    def _run_render_preview(self) -> None:
+        url = self.url_edit.text().strip()
+        selector = self.selector_edit.text().strip()
+        if not url:
+            QMessageBox.warning(self, "입력 오류", "URL을 입력하세요.")
+            return
+        if not selector:
+            QMessageBox.warning(self, "입력 오류", "CSS selector를 입력하세요.")
+            return
+        if not self._ensure_webengine():
+            return
+        if self._we_fetcher is None or self._we_fetcher.busy or self._poller.busy:
+            QMessageBox.information(self, "크롤링", "이미 요청을 처리 중입니다.")
+            return
+        attr = self.attr_combo.currentText()
+        limit = int(self.limit_spin.value())
+        column = self.column_edit.text().strip() or "value"
+        self._set_busy(True, "브라우저 렌더 중…")
+
+        def on_html(html: str | None, error: str | None) -> None:
+            if error or html is None:
+                self._set_busy(False, "렌더 실패")
+                QMessageBox.critical(self, "브라우저 렌더 실패", error or "알 수 없는 오류")
+                if self.on_log:
+                    self.on_log("error", "크롤링 브라우저 렌더 실패", error)
+                return
+            try:
+                df = crawl_to_dataframe(html, selector, attr=attr, limit=limit, column=column)
+            except Exception as exc:
+                self._set_busy(False, "추출 실패")
+                QMessageBox.critical(self, "추출 실패", str(exc))
+                return
+            self._fill_preview_table(self.preview_table, df)
+            self._set_busy(False, f"렌더 미리보기 {len(df):,}행")
+            if self.on_log:
+                self.on_log("info", "크롤링 브라우저 렌더", f"{len(df):,}행")
+
+        try:
+            self._we_fetcher.fetch(url, settle_ms=_BROWSER_SETTLE_MS, callback=on_html)
+        except Exception as exc:
+            self._set_busy(False, "렌더 실패")
+            QMessageBox.critical(self, "브라우저 렌더 실패", str(exc))
+
     def _run_batch(self) -> None:
         template = self.batch_template.text().strip()
         if not template:
@@ -588,17 +810,143 @@ class CrawlPanel(QWidget):
         if self.on_log:
             self.on_log("info", "크롤링 일괄 미리보기", f"{len(df):,}건 · 오류 {err_n}")
 
+    def _run_batch_browser(self) -> None:
+        template = self.batch_template.text().strip()
+        if not template:
+            QMessageBox.warning(self, "입력 오류", "URL 템플릿을 입력하세요. 예: ...?idx={code}")
+            return
+        try:
+            params = parse_param_list(self.batch_params.toPlainText())
+            fields = parse_fields_text(self.batch_fields.toPlainText())
+        except ValueError as exc:
+            QMessageBox.warning(self, "입력 오류", str(exc))
+            return
+        if not params:
+            QMessageBox.warning(self, "입력 오류", "파라미터 목록이 비어 있습니다.")
+            return
+        if not self._ensure_webengine():
+            return
+        if self._we_fetcher is None or self._we_fetcher.busy or self._poller.busy:
+            QMessageBox.information(self, "크롤링", "이미 요청을 처리 중입니다.")
+            return
+        param_key = self.batch_param_key.text().strip() or "code"
+        max_items = int(self.batch_max.value())
+        values = params[:max_items]
+        queue: list[tuple[str, str]] = []
+        for value in values:
+            try:
+                url = render_url_template(template, **{param_key: value})
+            except ValueError as exc:
+                QMessageBox.warning(self, "입력 오류", str(exc))
+                return
+            queue.append((value, url))
+        self._browser_queue = queue
+        self._browser_rows = []
+        self._browser_fields = fields
+        self._browser_param_key = param_key
+        self._set_busy(True, f"브라우저 일괄 0/{len(queue)}…")
+        self._advance_browser_batch()
+
+    def _advance_browser_batch(self) -> None:
+        assert self._we_fetcher is not None
+        total = len(self._browser_rows) + len(self._browser_queue)
+        if not self._browser_queue:
+            df = pd.DataFrame(self._browser_rows)
+            self._fill_preview_table(self.batch_preview, df)
+            err_n = int((df["error"].astype(str).str.len() > 0).sum()) if "error" in df.columns else 0
+            self._set_busy(False, f"브라우저 일괄 {len(df):,}건 (오류 {err_n})")
+            if self.on_log:
+                self.on_log("info", "크롤링 브라우저 일괄", f"{len(df):,}건 · 오류 {err_n}")
+            return
+        value, url = self._browser_queue.pop(0)
+        done = len(self._browser_rows)
+        self.status_label.setText(f"브라우저 일괄 {done + 1}/{total}…")
+        key = self._browser_param_key
+        fields = self._browser_fields or []
+
+        def on_html(html: str | None, error: str | None) -> None:
+            row: dict[str, str] = {key: value, "url": url}
+            if error or html is None:
+                for field in fields:
+                    row[field.name] = ""
+                row["error"] = error or "렌더 실패"
+            else:
+                try:
+                    row.update(extract_fields(html, fields))
+                    row["error"] = ""
+                except Exception as exc:
+                    for field in fields:
+                        row.setdefault(field.name, "")
+                    row["error"] = str(exc)
+            self._browser_rows.append(row)
+            self._advance_browser_batch()
+
+        try:
+            self._we_fetcher.fetch(url, settle_ms=_BROWSER_SETTLE_MS, callback=on_html)
+        except Exception as exc:
+            row = {key: value, "url": url, "error": str(exc)}
+            for field in fields:
+                row[field.name] = ""
+            self._browser_rows.append(row)
+            self._advance_browser_batch()
+
     def _run_import(self) -> None:
         if self._preview_df is None or self._preview_df.empty:
             QMessageBox.information(self, "표로 가져오기", "먼저 미리보기/일괄 수집을 실행하세요.")
             return
+
+        mode = self.import_mode.currentData()
+        crawl_df = self._preview_df.copy()
+
+        if mode == "merge":
+            base = self.get_dataframe()
+            if base is None or base.empty:
+                QMessageBox.warning(
+                    self,
+                    "열린 표에 병합",
+                    "가공 탭에 열린 표가 없습니다.\n"
+                    "먼저 표를 열거나, 가져오기 방식을 ‘크롤 결과로 교체’로 바꾸세요.",
+                )
+                return
+            left_on = self.merge_left_col.currentText().strip()
+            if not left_on:
+                QMessageBox.warning(self, "열린 표에 병합", "열린 표의 키 열을 선택하세요.")
+                return
+            right_on = self.batch_param_key.text().strip() or "code"
+            if right_on not in crawl_df.columns:
+                # 단일 페이지 미리보기는 파라미터 키가 없을 수 있음
+                QMessageBox.warning(
+                    self,
+                    "열린 표에 병합",
+                    f"크롤 결과에 키 열 '{right_on}'이(가) 없습니다.\n"
+                    "일괄(URL 패턴) 미리보기 결과에서 병합하거나, "
+                    "파라미터 키와 같은 이름의 열이 있어야 합니다.",
+                )
+                return
+            try:
+                merged = merge_crawl_into_base(
+                    base, crawl_df, left_on=left_on, right_on=right_on
+                )
+            except ValueError as exc:
+                QMessageBox.warning(self, "병합 실패", str(exc))
+                return
+            label = f"크롤링 병합 ({left_on}↔{right_on}, +{len(crawl_df.columns) - 1}열)"
+            if self.on_apply_merged is not None:
+                self.on_apply_merged(merged, label)
+            else:
+                self.on_import(merged, label)
+            if self.on_log:
+                self.on_log("success", label, f"{len(merged):,}행")
+            return
+
+        # replace
         if self.has_data():
             reply = QMessageBox.question(
                 self,
                 "표로 가져오기",
-                "현재 열린 데이터를 크롤링 결과로 바꿀까요?\n\n저장하지 않은 변경은 사라질 수 있습니다.",
+                "현재 열린 데이터를 크롤링 결과로 바꿀까요?\n\n"
+                "기존 표를 유지하려면 가져오기 방식을 ‘열린 표에 병합’으로 바꾸세요.",
             )
             if reply != QMessageBox.StandardButton.Yes:
                 return
-        df = self._preview_df.copy()
-        self.on_import(df, f"크롤링 가져오기 ({len(df):,}행)")
+        self.on_import(crawl_df, f"크롤링 가져오기 ({len(crawl_df):,}행)")

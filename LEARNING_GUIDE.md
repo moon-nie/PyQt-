@@ -187,7 +187,8 @@ python scripts/run_all_qa.py
 - `qa_viewer_smoke.py` — 검색 필터·결과 추출·클립보드·코너 전체 선택
 - `qa_panels_dialogs_smoke.py` — CodePanel 실행·VLookup 미리보기/적용
 - `qa_mainwindow_smoke.py` — 로드·undo·비동기 결측·window.json
-- `run_all_qa.py` — operations·analysis·panel·main·panels_dialogs·loader·viewer·grid (8종)
+- `qa_crawl_smoke.py` — 크롤 로직·병합·Cookie 헤더 (로컬 HTML, 네트워크 없음)
+- `run_all_qa.py` — operations·analysis·panel·main·panels_dialogs·loader·viewer·crawl·grid (**9종**)
 
 코드를 읽은 뒤 **테스트 파일**을 보면 「기대 동작」을 빠르게 확인할 수 있습니다.
 

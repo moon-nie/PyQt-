@@ -18,11 +18,17 @@ _PACKAGE_LABEL = {
     "numpy": "numpy",
     "sklearn": "scikit-learn",
     "scipy": "scipy",
+    "PyQt6.QtWebEngineWidgets": "PyQt6-WebEngine",
 }
 
 
 def _package_available(module_name: str) -> bool:
     try:
+        import importlib.util
+
+        if importlib.util.find_spec(module_name) is None:
+            return False
+        # find_spec만으로 부족한 확장 모듈이 있어 실제 import도 확인
         __import__(module_name)
         return True
     except ImportError:
@@ -53,8 +59,15 @@ def feature_requirement_message(
         head = f"{feature}에는 {label}이(가) 필요합니다."
     else:
         head = f"{label} 설치 후 사용할 수 있습니다."
+    # WebEngine은 별도 패키지라 직접 설치 명령을 함께 안내
+    if module_name == "PyQt6.QtWebEngineWidgets":
+        hint = "pip install PyQt6-WebEngine\n(또는 pip install -r requirements.txt)\n앱을 쓰는 것과 같은 Python으로 설치한 뒤 앱을 다시 실행하세요."
+    else:
+        hint = INSTALL_HINT
     separator = " " if inline else "\n"
-    return f"{head}{separator}{INSTALL_HINT}"
+    if inline and module_name == "PyQt6.QtWebEngineWidgets":
+        return f"{head} pip install PyQt6-WebEngine 후 앱 재실행"
+    return f"{head}{separator}{hint}"
 
 
 def missing_analysis_dependencies() -> list[str]:
@@ -105,3 +118,17 @@ def sklearn_available() -> bool:
 
 def scipy_available() -> bool:
     return _package_available("scipy")
+
+
+def webengine_available() -> bool:
+    """인앱 로그인 브라우저·JS 렌더 추출용 Qt WebEngine.
+
+    패키지 존재만 확인합니다. 실제 import는 ``gridloom.pyw``에서
+    QApplication 생성 **전**에 해야 하므로, 여기서는 find_spec만 사용합니다.
+    """
+    try:
+        import importlib.util
+
+        return importlib.util.find_spec("PyQt6.QtWebEngineWidgets") is not None
+    except (ImportError, ModuleNotFoundError, ValueError):
+        return False

@@ -299,6 +299,7 @@ class MainWindow(QMainWindow):
 
         self.crawl_panel = CrawlPanel(
             on_import=self._apply_crawled_dataframe,
+            on_apply_merged=self._apply_crawled_merge,
             has_data=lambda: self._loaded is not None,
             get_dataframe=lambda: self._loaded.dataframe if self._loaded else None,
             on_log=self._log_action,
@@ -464,6 +465,15 @@ class MainWindow(QMainWindow):
         self._show_page("main")
         self._set_status(f"{message} — {len(df):,}행 × {len(df.columns):,}열")
         self._log_action("success", message, f"{len(df):,}행 × {len(df.columns):,}열")
+
+    def _apply_crawled_merge(self, df: pd.DataFrame, message: str) -> None:
+        """크롤 결과를 열린 표에 병합한 DataFrame을 undo 스택과 함께 반영합니다."""
+        if df is None or df.empty:
+            self._toast_warning("병합할 결과가 없습니다.")
+            return
+        self._apply_dataframe(df, message=message)
+        self._show_page("main")
+        self.crawl_panel.refresh_data_columns()
 
     @staticmethod
     def _format_action_message(message: str) -> str:

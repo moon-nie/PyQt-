@@ -1,6 +1,8 @@
 """웹 페이지 CSS selector 크롤링 — 순수 로직 (PyQt 금지).
 
-정적 HTML만 지원합니다. JS로만 그려지는 SPA는 결과가 비어 있을 수 있습니다.
+기본 `fetch_html`은 정적 HTML만 가져옵니다. JS SPA·관리자 로그인이 필요하면
+UI 계층(`qt_webengine_crawl`)에서 렌더된 HTML을 받은 뒤 이 모듈의
+`extract_by_css` / `crawl_to_dataframe` / `extract_fields`를 사용합니다.
 """
 from __future__ import annotations
 
@@ -15,6 +17,7 @@ DEFAULT_USER_AGENT = (
     "Gridloom/0.8 (+https://github.com/moon-nie/PyQt-; desktop tabular workbench)"
 )
 ALLOWED_ATTRS = ("text", "href", "src")
+MULTI_VALUE_JOIN = " | "
 
 _SKIP_TAGS = frozenset(
     {
@@ -255,12 +258,103 @@ def render_url_template(template: str, **params: str) -> str:
         raise ValueError(f"잘못된 URL 템플릿: {exc}") from exc
 
 
-def extract_fields(html: str, fields: list[CrawlField]) -> dict[str, str]:
-    """페이지에서 필드별 첫 매칭 값을 추출합니다."""
+def format_cookie_header(cookies: dict[str, str]) -> str:
+    """이름→값 딕셔너리를 HTTP Cookie 헤더 문자열로 만듭니다."""
+    parts = []
+    for name, value in cookies.items():
+        n = str(name).strip()
+        if not n:
+            continue
+        parts.append(f"{n}={value}")
+    return "; ".join(parts)
+
+
+def _crawl_join_key(value) -> object:
+    """크롤 병합용 키 정규화 (숫자 13 과 문자열 '13'을 같게)."""
+    if value is None:
+        return pd.NA
+    try:
+        if pd.isna(value):
+            return pd.NA
+    except (TypeError, ValueError):
+        pass
+    if isinstance(value, bool):
+        return str(value)
+    if isinstance(value, (int, float)):
+        if float(value) == int(value):
+            return str(int(value))
+        return str(value).strip()
+    text = str(value).strip()
+    return text if text else pd.NA
+
+
+def merge_crawl_into_base(
+    base: pd.DataFrame,
+    crawl: pd.DataFrame,
+    *,
+    left_on: str,
+    right_on: str,
+) -> pd.DataFrame:
+    """열린 표(base)에 크롤 결과(crawl)를 키로 left-join 합니다.
+
+    base 행 수·순서는 유지하고, crawl의 추가 열만 붙입니다.
+    같은 키가 crawl에 여러 행이면 첫 행만 사용합니다.
+    """
+    if base is None or not isinstance(base, pd.DataFrame) or base.empty:
+        raise ValueError("열린 표가 비어 있습니다.")
+    if crawl is None or not isinstance(crawl, pd.DataFrame) or crawl.empty:
+        raise ValueError("크롤 결과가 비어 있습니다.")
+    if left_on not in base.columns:
+        raise ValueError(f"열린 표에 열 '{left_on}'이(가) 없습니다.")
+    if right_on not in crawl.columns:
+        raise ValueError(f"크롤 결과에 키 열 '{right_on}'이(가) 없습니다.")
+
+    left = base.copy()
+    right = crawl.copy()
+    left_tmp = "__gl_crawl_lkey__"
+    right_tmp = "__gl_crawl_rkey__"
+    left[left_tmp] = left[left_on].map(_crawl_join_key)
+    right[right_tmp] = right[right_on].map(_crawl_join_key)
+    # 결측 키는 매칭하지 않음 (모든 빈 키가 하나로 붙는 것 방지)
+    right = right[right[right_tmp].notna()].copy()
+    right = right.drop_duplicates(subset=[right_tmp], keep="first")
+
+    bring = [c for c in right.columns if c not in {right_tmp, right_on}]
+    right_slim = right[[right_tmp, *bring]].copy()
+    # 열린 표와 이름 충돌 시 _crawl 접미사
+    rename = {}
+    for col in bring:
+        if col in left.columns:
+            rename[col] = f"{col}_crawl"
+    if rename:
+        right_slim = right_slim.rename(columns=rename)
+
+    merged = left.merge(right_slim, how="left", left_on=left_tmp, right_on=right_tmp)
+    return merged.drop(columns=[left_tmp, right_tmp], errors="ignore")
+
+
+def extract_fields(
+    html: str,
+    fields: list[CrawlField],
+    *,
+    join_multi: bool = True,
+    join_separator: str = MULTI_VALUE_JOIN,
+) -> dict[str, str]:
+    """페이지에서 필드별 값을 추출합니다.
+
+    ``join_multi=True``이면 매칭이 여러 개일 때 구분자로 이어 붙입니다
+    (상세 이미지 src 여러 장 등). False면 첫 매칭만 사용합니다.
+    """
     result: dict[str, str] = {}
     for field in fields:
-        values = extract_by_css(html, field.selector, attr=field.attr, limit=1)
-        result[field.name] = values[0] if values else ""
+        limit = None if join_multi else 1
+        values = [v for v in extract_by_css(html, field.selector, attr=field.attr, limit=limit) if v]
+        if not values:
+            result[field.name] = ""
+        elif len(values) == 1 or not join_multi:
+            result[field.name] = values[0]
+        else:
+            result[field.name] = join_separator.join(values)
     return result
 
 

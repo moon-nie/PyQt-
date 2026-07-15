@@ -1,5 +1,47 @@
 # Gridloom — 변경 기록
 
+## v0.8.33 (2026-07-14)
+
+### 전수 점검 · 브라우저 렌더 타임아웃 · 문서 정합
+- 브라우저 렌더 fetch에 **60초 하드 타임아웃** — loadFinished 미수신 시 UI busy 고착 방지
+- `merge_crawl_into_base` 결측 키 오매칭 방지
+- `qa_crawl_smoke`에 병합 중복키·열 충돌·결측키 회귀 추가
+- `LEARNING_GUIDE` QA 목록을 실제 9종(crawl 포함)에 맞춤
+- 미러(`github_upload/`) 재동기화
+
+---
+
+## v0.8.32 (2026-07-14)
+
+### 크롤 미리보기 리사이즈 · 열린 표에 병합 가져오기
+- 단일/일괄 미리보기 표를 **구분선 드래그**로 높이·영역 조절
+- 일괄 최대 건수 상한 50,000 (기본 100)
+- **표로 가져오기**: `크롤 결과로 교체` / `열린 표에 병합` 선택
+- 열린 표 열에서 파라미터를 채우면 병합 모드·키 열을 자동 맞춤
+- 로직: `crawl.merge_crawl_into_base` (키 정규화 left-join, undo 유지)
+
+---
+
+## v0.8.31 (2026-07-14)
+
+### 로그인 브라우저 WebEngine 감지 수정
+- `QApplication` 생성 **전**에 WebEngine을 import하도록 `gridloom.pyw` 수정
+- 패키지가 있어도 앱 실행 후 import 검사로 ‘미설치’로 보이던 문제 해결
+- `requirements.txt`에 `PyQt6-WebEngine>=6.6.0` 유지
+
+---
+
+## v0.8.30 (2026-07-14)
+
+### 크롤링 로그인 브라우저 · JS 렌더 추출
+- **[로그인 브라우저]** — Qt WebEngine으로 사이트에 직접 로그인 후 Cookie 적용
+- **[브라우저 렌더 미리보기]** / **[브라우저로 일괄]** — JS로 그려진 DOM에서 selector 추출
+- 의존성: `PyQt6-WebEngine` (`requirements.txt`, `analysis_deps.webengine_available` 게이트)
+- 일괄 필드 다중 매칭(이미지 src 여러 장)은 ` | `로 이어 붙임
+- 세션 저장: `~/.gridloom/webengine/`
+
+---
+
 ## v0.8.29 (2026-07-14)
 
 ### Mac·크로스플랫폼 UI 폰트 (한글 깨짐 방지)

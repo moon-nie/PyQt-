@@ -1,7 +1,7 @@
 ﻿# Gridloom — 프로젝트 파일 지도
 
 > **목적:** 파일이 많아도 어디를 고치면 되는지 바로 찾기  
-> **PyQt** (`gridloom.pyw`) 기준 · v0.8.29
+> **PyQt** (`gridloom.pyw`) 기준 · v0.8.33
 
 | 함께 볼 문서 | 대상 |
 |--------------|------|
@@ -47,6 +47,7 @@ Gridloom/
     ├── branding.py           APP_NAME, 설정 경로
     ├── window_state.py       창 위치·크기 (window.json)
     ├── crawl.py              정적 HTML CSS selector 크롤링
+    ├── qt_webengine_crawl.py 로그인 브라우저 · JS 렌더 HTML
     ├── theme.py              COLORS, theme.json
     ├── ui_fonts.py           OS별 UI/HTML/모노스페이스 폰트 스택
     ├── qt_theme.py           공통 stylesheet · monospace_qfont
@@ -114,7 +115,7 @@ gridloom.pyw
 | 결측 채우기(KNN/MICE) | `operations.py`, `qt_data_dialogs.py`, `qt_analysis_panel.py` |
 | EDA 통계·추천 | `analysis.py` |
 | 분석 탭 UI | `qt_analysis_panel.py` |
-| 크롤링 탭 | `crawl.py`, `qt_crawl_panel.py`, `qt_app.py` |
+| 크롤링 탭 | `crawl.py`, `qt_webengine_crawl.py`, `qt_crawl_panel.py`, `qt_app.py` |
 | 이상치(IQR/Z/IF) | `operations.py`, `analysis.py`, `qt_analysis_panel.py` |
 | 차트 꾸미기 | `chart_style.py`, `qt_chart_style_dialog.py`, `qt_analysis_panel.py` |
 | HTML 리포트 | `eda_report.py`, `qt_analysis_panel.py` |

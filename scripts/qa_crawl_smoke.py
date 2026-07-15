@@ -84,6 +84,48 @@ def main() -> int:
     assert extracted["종목명"] == "삼성전자"
     assert "264000" in extracted["현재가"]
 
+    # 다중 src 조인
+    multi = extract_fields(
+        '<html><body><img src="/a.png"/><img src="/b.png"/></body></html>',
+        [CrawlField("imgs", "img", "src")],
+    )
+    assert multi["imgs"] == "/a.png | /b.png", multi
+
+    from df_tool.crawl import format_cookie_header, merge_crawl_into_base
+
+    assert format_cookie_header({"sid": "1", "x": "y"}) == "sid=1; x=y"
+
+    base = pd.DataFrame({"idx": [13, 99, 7], "name": ["a", "b", "c"]})
+    crawled = pd.DataFrame(
+        {
+            "code": ["13", "7"],
+            "url": ["u1", "u2"],
+            "img": ["i1", "i2"],
+            "error": ["", ""],
+        }
+    )
+    merged = merge_crawl_into_base(base, crawled, left_on="idx", right_on="code")
+    assert list(merged["name"]) == ["a", "b", "c"]
+    assert merged.loc[0, "img"] == "i1"
+    assert pd.isna(merged.loc[1, "img"])
+    assert merged.loc[2, "img"] == "i2"
+    assert "url" in merged.columns
+
+    # 중복 키·열 이름 충돌
+    base2 = pd.DataFrame({"code": [1], "url": ["old"]})
+    crawl2 = pd.DataFrame({"code": [1, 1], "url": ["new", "ignored"], "img": ["i", "x"]})
+    m2 = merge_crawl_into_base(base2, crawl2, left_on="code", right_on="code")
+    assert m2.loc[0, "url"] == "old"
+    assert m2.loc[0, "url_crawl"] == "new"
+    assert m2.loc[0, "img"] == "i"
+
+    # 결측 키는 붙지 않음
+    base3 = pd.DataFrame({"id": [1, None], "x": [1, 2]})
+    crawl3 = pd.DataFrame({"code": [None, 1], "v": ["bad", "ok"]})
+    m3 = merge_crawl_into_base(base3, crawl3, left_on="id", right_on="code")
+    assert m3.loc[0, "v"] == "ok"
+    assert pd.isna(m3.loc[1, "v"])
+
     # crawl_batch는 네트워크가 필요하므로 템플릿에 자리표시자 없이 실패 경로만
     # — 대신 로직 단위로 이미 검증. 빈 params는 에러.
     try:
@@ -91,6 +133,11 @@ def main() -> int:
         raise AssertionError("빈 params는 ValueError")
     except ValueError:
         pass
+
+    from df_tool.analysis_deps import webengine_available
+
+    # WebEngine은 선택 설치 — 가용성 함수만 확인 (headless에서 창 생성은 스킵)
+    assert isinstance(webengine_available(), bool)
 
     print("qa_crawl_smoke: OK")
     return 0
