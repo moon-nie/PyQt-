@@ -5,9 +5,7 @@ from pathlib import Path
 from typing import Callable
 
 import pandas as pd
-from matplotlib.backends.backend_qtagg import FigureCanvasQTAgg as FigureCanvas
-from matplotlib.figure import Figure
-from PyQt6.QtCore import Qt
+from PyQt6.QtCore import Qt, QTimer
 from PyQt6.QtWidgets import (
     QAbstractItemView,
     QCheckBox,
@@ -41,8 +39,10 @@ from df_tool.analysis_deps import (
 )
 from df_tool.qt_dependency import gate_combo_item, gate_widget, require
 from df_tool.chart_style import ChartStyle, load_chart_style
-from df_tool.eda_report import build_eda_html
+from df_tool.eda_report import build_eda_html, default_eda_report_filename
 from df_tool.qt_chart_style_dialog import qt_chart_style_dialog
+from df_tool.analysis_help import tip_text
+from df_tool.qt_help_tip import add_label_with_help, help_tip_badge
 from df_tool.analysis import (
     PLOT_MAX_ROWS,
     bivariate_chart_options,
@@ -109,76 +109,91 @@ def _truncate_chart_label(value: str, *, max_len: int = 14) -> str:
     return text if len(text) <= max_len else f"{text[: max_len - 1]}…"
 
 
-class MplCanvas(FigureCanvas):
-    def __init__(
-        self,
-        parent=None,
-        chart_style: ChartStyle | None = None,
-        *,
-        width: float | None = None,
-        height: float = 4,
-    ) -> None:
-        self._chart_style = chart_style
-        style = chart_style or load_chart_style()
-        fig_w = width if width is not None else style.figure_width
-        configure_matplotlib_font()
-        self.fig = Figure(figsize=(fig_w, height), dpi=style.dpi)
-        self.fig.patch.set_facecolor(style.figure_bg)
-        super().__init__(self.fig)
-        self.setParent(parent)
+_MplCanvasType = None
 
-    def _style(self) -> ChartStyle:
-        return self._chart_style or load_chart_style()
 
-    def clear_axes(self) -> None:
-        style = self._style()
-        self.fig.clear()
-        self.fig.patch.set_facecolor(style.figure_bg)
+def get_mpl_canvas_type():
+    """matplotlib 사용 시에만 FigureCanvas를 로드합니다."""
+    global _MplCanvasType
+    if _MplCanvasType is not None:
+        return _MplCanvasType
+    from matplotlib.backends.backend_qtagg import FigureCanvasQTAgg as FigureCanvas
+    from matplotlib.figure import Figure
 
-    def begin_chart(self):
-        """축을 비우고 단일 subplot을 만들어 스타일을 적용한 ``ax``를 반환한다.
+    class MplCanvas(FigureCanvas):
+        def __init__(
+            self,
+            parent=None,
+            chart_style: ChartStyle | None = None,
+            *,
+            width: float | None = None,
+            height: float = 4,
+        ) -> None:
+            self._chart_style = chart_style
+            style = chart_style or load_chart_style()
+            fig_w = width if width is not None else style.figure_width
+            configure_matplotlib_font()
+            self.fig = Figure(figsize=(fig_w, height), dpi=style.dpi)
+            self.fig.patch.set_facecolor(style.figure_bg)
+            super().__init__(self.fig)
+            self.setParent(parent)
 
-        대부분의 ``_draw_*`` 차트가 공유하는 시작 보일러플레이트.
-        (격자형 Pair plot처럼 여러 subplot이 필요한 경우는 직접 구성한다.)
-        """
-        self.clear_axes()
-        ax = self.fig.add_subplot(111)
-        self.style_axes(ax)
-        return ax
+        def _style(self) -> ChartStyle:
+            return self._chart_style or load_chart_style()
 
-    def finish_chart(self) -> None:
-        """레이아웃을 정리하고 캔버스를 다시 그린다(차트 마무리 보일러플레이트)."""
-        self.fig.tight_layout()
-        self.draw()
+        def clear_axes(self) -> None:
+            style = self._style()
+            self.fig.clear()
+            self.fig.patch.set_facecolor(style.figure_bg)
 
-    def style_axes(self, ax) -> None:
-        style = self._style()
-        ax.set_facecolor(style.axes_bg)
-        ax.tick_params(
-            colors=style.color_text,
-            labelsize=style.tick_font_size,
-            width=1,
-            length=4,
-        )
-        ax.xaxis.label.set_color(style.color_text)
-        ax.yaxis.label.set_color(style.color_text)
-        ax.title.set_color(style.color_text)
-        ax.title.set_fontsize(style.title_font_size)
-        ax.xaxis.label.set_fontsize(style.label_font_size)
-        ax.yaxis.label.set_fontsize(style.label_font_size)
-        if style.show_grid:
-            ax.grid(
-                True,
-                color=style.grid_color,
-                alpha=style.grid_alpha,
-                linestyle="--",
-                linewidth=0.8,
+        def begin_chart(self):
+            """축을 비우고 단일 subplot을 만들어 스타일을 적용한 ``ax``를 반환한다.
+
+            대부분의 ``_draw_*`` 차트가 공유하는 시작 보일러플레이트.
+            (격자형 Pair plot처럼 여러 subplot이 필요한 경우는 직접 구성한다.)
+            """
+            self.clear_axes()
+            ax = self.fig.add_subplot(111)
+            self.style_axes(ax)
+            return ax
+
+        def finish_chart(self) -> None:
+            """레이아웃을 정리하고 캔버스를 다시 그린다(차트 마무리 보일러플레이트)."""
+            self.fig.tight_layout()
+            self.draw()
+
+        def style_axes(self, ax) -> None:
+            style = self._style()
+            ax.set_facecolor(style.axes_bg)
+            ax.tick_params(
+                colors=style.color_text,
+                labelsize=style.tick_font_size,
+                width=1,
+                length=4,
             )
-        else:
-            ax.grid(False)
-        for spine in ax.spines.values():
-            spine.set_color(style.color_border)
-            spine.set_linewidth(1.0)
+            ax.xaxis.label.set_color(style.color_text)
+            ax.yaxis.label.set_color(style.color_text)
+            ax.title.set_color(style.color_text)
+            ax.title.set_fontsize(style.title_font_size)
+            ax.xaxis.label.set_fontsize(style.label_font_size)
+            ax.yaxis.label.set_fontsize(style.label_font_size)
+            if style.show_grid:
+                ax.grid(
+                    True,
+                    color=style.grid_color,
+                    alpha=style.grid_alpha,
+                    linestyle="--",
+                    linewidth=0.8,
+                )
+            else:
+                ax.grid(False)
+            for spine in ax.spines.values():
+                spine.set_color(style.color_border)
+                spine.set_linewidth(1.0)
+
+    _MplCanvasType = MplCanvas
+    return _MplCanvasType
+
 
 
 class AnalysisPanel(QWidget):
@@ -188,12 +203,14 @@ class AnalysisPanel(QWidget):
         get_dataframe: Callable[[], pd.DataFrame | None],
         on_apply: Callable[[pd.DataFrame, str], None],
         on_log: Callable[[str, str, str | None], None] | None = None,
+        get_source_path: Callable[[], Path | None] | None = None,
         parent=None,
     ) -> None:
         super().__init__(parent)
         self._get_df = get_dataframe
         self._on_apply = on_apply
         self._on_log = on_log
+        self._get_source_path = get_source_path
         self._df: pd.DataFrame | None = None
         self._charts_dirty = True
         self._deps_ok = charts_available()
@@ -201,6 +218,38 @@ class AnalysisPanel(QWidget):
         self._analysis_token = 0
         self._chart_style = load_chart_style()
         self._build_ui()
+
+    def _new_chart_canvas(self, parent: QWidget, *, height: float = 4):
+        """차트 가능하면 MplCanvas, 아니면 안내 라벨."""
+        if not charts_available():
+            lab = QLabel(charts_deps_message() or "차트를 쓰려면 matplotlib이 필요합니다.")
+            lab.setWordWrap(True)
+            lab.setAlignment(Qt.AlignmentFlag.AlignCenter)
+            lab.setStyleSheet(f"color: {COLORS['text_muted']}; padding: 24px;")
+            lab.setMinimumHeight(int(height * 40))
+            return lab
+        return get_mpl_canvas_type()(parent, self._chart_style, height=height)
+
+    def _canvas_ok(self, canvas) -> bool:
+        return canvas is not None and hasattr(canvas, "begin_chart")
+
+    def _export_canvas_png(self, canvas, stem: str = "chart") -> None:
+        if not self._canvas_ok(canvas):
+            QMessageBox.information(self, "PNG 저장", "저장할 차트가 없습니다.")
+            return
+        path, _ = QFileDialog.getSaveFileName(
+            self, "차트 PNG 저장", f"{stem}.png", "PNG 이미지 (*.png)"
+        )
+        if not path:
+            return
+        try:
+            canvas.fig.savefig(path, dpi=160, bbox_inches="tight")
+        except Exception as exc:
+            QMessageBox.critical(self, "PNG 저장", str(exc))
+            return
+        if self._on_log:
+            self._on_log("success", f"차트 PNG 저장: {Path(path).name}", path)
+        QMessageBox.information(self, "PNG 저장", f"저장 완료:\n{path}")
 
     def _build_ui(self) -> None:
         layout = QVBoxLayout(self)
@@ -213,9 +262,11 @@ class AnalysisPanel(QWidget):
         header.addWidget(self._title_label)
         header.addStretch()
         eda_btn = primary_button("EDA 요약 실행")
+        eda_btn.setToolTip("개요·대표 차트를 한 번에 갱신합니다.")
         eda_btn.clicked.connect(self._run_eda_summary)
         header.addWidget(eda_btn)
         report_btn = QPushButton("HTML 리포트")
+        report_btn.setToolTip("브라우저용 HTML로 저장합니다.")
         report_btn.clicked.connect(self._export_html_report)
         header.addWidget(report_btn)
         style_btn = QPushButton("차트 꾸미기")
@@ -307,6 +358,43 @@ class AnalysisPanel(QWidget):
     def _on_axis_auto_toggled(self, prefix: str, checked: bool) -> None:
         for name in ("xmin", "xmax", "ymin", "ymax"):
             getattr(self, f"_{prefix}_{name}").setEnabled(not checked)
+        self._schedule_chart_redraw(prefix)
+
+    def _schedule_chart_redraw(self, which: str) -> None:
+        """설정 변경 직후 차트를 다시 그립니다 (짧은 디바운스)."""
+        if self._df is None or not self._deps_ok:
+            return
+        if which == "uni":
+            timer_attr = "_uni_redraw_timer"
+            callback = self._draw_univariate
+        elif which == "bi":
+            timer_attr = "_bi_redraw_timer"
+            callback = self._draw_bivariate
+        else:
+            return
+        timer = getattr(self, timer_attr, None)
+        if timer is None:
+            timer = QTimer(self)
+            timer.setSingleShot(True)
+            setattr(self, timer_attr, timer)
+        try:
+            timer.timeout.disconnect()
+        except TypeError:
+            pass
+        timer.timeout.connect(callback)
+        timer.start(200)
+
+    def _confirm_all_numeric_apply(self, title: str, action: str, col_count: int) -> bool:
+        """열을 고르지 않아 전체 숫자 열에 적용할 때 확인."""
+        return (
+            QMessageBox.question(
+                self,
+                title,
+                f"열을 선택하지 않아 숫자 열 전체 {col_count}개에 {action}합니다.\n"
+                f"적용 후 Ctrl+Z로 되돌릴 수 있습니다.\n계속할까요?",
+            )
+            == QMessageBox.StandardButton.Yes
+        )
 
     def _resolve_chart_title(self, default: str, local_override: str = "") -> str | None:
         local = local_override.strip()
@@ -352,13 +440,26 @@ class AnalysisPanel(QWidget):
         if self._df is None or self._df.empty:
             QMessageBox.information(self, "HTML 리포트", "먼저 데이터를 열어 주세요.")
             return
+        source: Path | None = None
+        if self._get_source_path is not None:
+            try:
+                source = self._get_source_path()
+            except Exception:
+                source = None
+        default_name = default_eda_report_filename(source)
+        suggested = default_name
+        if source is not None and source.parent.is_dir():
+            suggested = str(source.parent / default_name)
         path, _ = QFileDialog.getSaveFileName(
-            self, "HTML EDA 리포트 저장", "eda_report.html", "HTML 파일 (*.html)"
+            self, "HTML EDA 리포트 저장", suggested, "HTML 파일 (*.html)"
         )
         if not path:
             return
+        stem = Path(source).stem if source is not None else Path(path).stem.replace("_report", "")
+        title = f"{stem} — EDA 리포트" if stem else "Gridloom EDA 리포트"
+        source_name = source.name if source is not None else None
         try:
-            html = build_eda_html(self._df)
+            html = build_eda_html(self._df, title=title, source_name=source_name)
             Path(path).write_text(html, encoding="utf-8")
         except Exception as exc:
             QMessageBox.critical(self, "HTML 리포트", str(exc))
@@ -455,14 +556,14 @@ class AnalysisPanel(QWidget):
         layout = QVBoxLayout(page)
         splitter = QSplitter(Qt.Orientation.Vertical)
         splitter.setChildrenCollapsible(False)
-        self._overview_table = QTableWidget(0, 8)
+        self._overview_table = QTableWidget(0, 10)
         self._overview_table.setHorizontalHeaderLabels(
-            ["컬럼", "종류", "타입", "결측", "결측%", "고유값", "평균", "표준편차"]
+            ["컬럼", "종류", "타입", "결측", "결측%", "고유값", "평균", "표준편차", "최소", "최대"]
         )
         self._overview_table.horizontalHeader().setStretchLastSection(True)
         self._overview_table.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
         splitter.addWidget(self._overview_table)
-        self._overview_canvas = MplCanvas(page, self._chart_style, height=3.8)
+        self._overview_canvas = self._new_chart_canvas(page, height=3.8)
         self._overview_canvas.setMinimumHeight(140)
         self._overview_canvas.setToolTip("개요 표와 결측 비율 그래프 사이 경계선을 드래그해 높이를 조절할 수 있습니다.")
         splitter.addWidget(self._overview_canvas)
@@ -481,20 +582,27 @@ class AnalysisPanel(QWidget):
         row.addWidget(self._uni_col, stretch=1)
         row.addWidget(QLabel("차트:"))
         self._uni_chart = QComboBox()
+        self._uni_chart.currentIndexChanged.connect(lambda: self._schedule_chart_redraw("uni"))
         row.addWidget(self._uni_chart)
-        row.addWidget(QLabel("bins:"))
+        add_label_with_help(row, "bins:", "bins")
         self._uni_bins = QSpinBox()
         self._uni_bins.setRange(5, 100)
         self._uni_bins.setValue(20)
+        self._uni_bins.valueChanged.connect(lambda: self._schedule_chart_redraw("uni"))
         row.addWidget(self._uni_bins)
-        row.addWidget(QLabel("top-N:"))
+        add_label_with_help(row, "top-N:", "top_n")
         self._uni_topn = QSpinBox()
         self._uni_topn.setRange(5, 50)
         self._uni_topn.setValue(15)
+        self._uni_topn.valueChanged.connect(lambda: self._schedule_chart_redraw("uni"))
         row.addWidget(self._uni_topn)
         draw_btn = QPushButton("분석·차트")
         draw_btn.clicked.connect(self._draw_univariate)
         row.addWidget(draw_btn)
+        png_btn = QPushButton("PNG 저장")
+        png_btn.setToolTip("현재 단변량 차트를 PNG 파일로 저장합니다.")
+        png_btn.clicked.connect(lambda: self._export_canvas_png(self._uni_canvas, "univariate"))
+        row.addWidget(png_btn)
         swap_btn = QPushButton("가로↔세로")
         swap_btn.setToolTip("값 축과 빈도 축을 바꿉니다 (막대·히스토그램)")
         swap_btn.clicked.connect(self._toggle_uni_orientation)
@@ -519,7 +627,7 @@ class AnalysisPanel(QWidget):
         self._uni_stats_table.horizontalHeader().setStretchLastSection(True)
         self._uni_stats_table.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
         splitter.addWidget(self._uni_stats_table)
-        self._uni_canvas = MplCanvas(page, self._chart_style, height=4)
+        self._uni_canvas = self._new_chart_canvas(page, height=4)
         splitter.addWidget(self._uni_canvas)
         splitter.setStretchFactor(0, 1)
         splitter.setStretchFactor(1, 2)
@@ -540,10 +648,15 @@ class AnalysisPanel(QWidget):
         row.addWidget(self._bi_y, stretch=1)
         row.addWidget(QLabel("차트:"))
         self._bi_chart = QComboBox()
+        self._bi_chart.currentIndexChanged.connect(lambda: self._schedule_chart_redraw("bi"))
         row.addWidget(self._bi_chart)
         draw_btn = QPushButton("분석·차트")
         draw_btn.clicked.connect(self._draw_bivariate)
         row.addWidget(draw_btn)
+        png_btn = QPushButton("PNG 저장")
+        png_btn.setToolTip("현재 이변량 차트를 PNG 파일로 저장합니다.")
+        png_btn.clicked.connect(lambda: self._export_canvas_png(self._bi_canvas, "bivariate"))
+        row.addWidget(png_btn)
         swap_btn = QPushButton("X↔Y 교환")
         swap_btn.clicked.connect(self._swap_bi_axes)
         row.addWidget(swap_btn)
@@ -569,7 +682,7 @@ class AnalysisPanel(QWidget):
         self._bi_table = QTableWidget(0, 0)
         self._bi_table.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
         splitter.addWidget(self._bi_table)
-        self._bi_canvas = MplCanvas(page, self._chart_style, height=4)
+        self._bi_canvas = self._new_chart_canvas(page, height=4)
         splitter.addWidget(self._bi_canvas)
         splitter.setStretchFactor(0, 1)
         splitter.setStretchFactor(1, 2)
@@ -591,14 +704,24 @@ class AnalysisPanel(QWidget):
         pair_btn = QPushButton("Pair plot")
         pair_btn.clicked.connect(self._draw_pair_plot)
         row.addWidget(pair_btn)
+        add_label_with_help(row, "Pair 최대 열:", "pair_plot")
+        self._pair_max_cols = QSpinBox()
+        self._pair_max_cols.setRange(2, 6)
+        self._pair_max_cols.setValue(4)
+        row.addWidget(self._pair_max_cols)
         self._pca_btn = QPushButton("PCA")
         self._pca_btn.clicked.connect(self._draw_pca)
         row.addWidget(self._pca_btn)
+        row.addWidget(help_tip_badge(page, "pca"))
+        png_btn = QPushButton("PNG 저장")
+        png_btn.setToolTip("현재 다변량 차트를 PNG로 저장합니다.")
+        png_btn.clicked.connect(lambda: self._export_canvas_png(self._multi_canvas, "multivariate"))
+        row.addWidget(png_btn)
         layout.addLayout(row)
-        self._multi_hint = QLabel("2개 이상 숫자 열 — 상관·Pair plot(4열)·PCA(2D).")
+        self._multi_hint = QLabel("2개 이상 숫자 열 — 상관·Pair plot·PCA(2D). 탭을 열면 상관 행렬을 그립니다.")
         self._multi_hint.setStyleSheet(f"color: {COLORS['text_muted']};")
         layout.addWidget(self._multi_hint)
-        self._multi_canvas = MplCanvas(page, self._chart_style, height=5)
+        self._multi_canvas = self._new_chart_canvas(page, height=5)
         layout.addWidget(self._multi_canvas, stretch=1)
         return page
 
@@ -608,16 +731,21 @@ class AnalysisPanel(QWidget):
         splitter = QSplitter(Qt.Orientation.Horizontal)
         left = QWidget()
         left_layout = QVBoxLayout(left)
-        left_layout.addWidget(QLabel("KNN 대체 대상 (숫자 열, 다중 선택):"))
+        left_layout.addWidget(QLabel("KNN/MICE 대상 (숫자 열, 다중 선택):"))
         self._missing_cols = QListWidget()
         self._missing_cols.setSelectionMode(QAbstractItemView.SelectionMode.MultiSelection)
         left_layout.addWidget(self._missing_cols)
         knn_row = QHBoxLayout()
-        knn_row.addWidget(QLabel("n_neighbors:"))
+        add_label_with_help(knn_row, "n_neighbors:", "n_neighbors")
         self._knn_neighbors = QSpinBox()
         self._knn_neighbors.setRange(1, 15)
         self._knn_neighbors.setValue(5)
         knn_row.addWidget(self._knn_neighbors)
+        add_label_with_help(knn_row, "MICE max_iter:", "max_iter")
+        self._mice_max_iter = QSpinBox()
+        self._mice_max_iter.setRange(1, 50)
+        self._mice_max_iter.setValue(10)
+        knn_row.addWidget(self._mice_max_iter)
         knn_row.addStretch()
         left_layout.addLayout(knn_row)
         self._missing_preview = QLabel("미리보기: —")
@@ -627,8 +755,10 @@ class AnalysisPanel(QWidget):
         self._knn_preview_btn = QPushButton("미리보기")
         self._knn_preview_btn.clicked.connect(self._preview_knn)
         self._knn_apply_btn = primary_button("KNN 적용")
+        self._knn_apply_btn.setToolTip(tip_text("knn"))
         self._knn_apply_btn.clicked.connect(self._apply_knn)
         self._mice_apply_btn = QPushButton("MICE 적용")
+        self._mice_apply_btn.setToolTip(tip_text("mice"))
         self._mice_apply_btn.clicked.connect(self._apply_mice)
         btn_row = QHBoxLayout()
         btn_row.addWidget(self._knn_preview_btn)
@@ -636,7 +766,7 @@ class AnalysisPanel(QWidget):
         btn_row.addWidget(self._mice_apply_btn)
         left_layout.addLayout(btn_row)
         splitter.addWidget(left)
-        self._missing_canvas = MplCanvas(page, self._chart_style, height=3)
+        self._missing_canvas = self._new_chart_canvas(page, height=3)
         splitter.addWidget(self._missing_canvas)
         splitter.setStretchFactor(0, 1)
         splitter.setStretchFactor(1, 2)
@@ -651,23 +781,51 @@ class AnalysisPanel(QWidget):
         left_layout = QVBoxLayout(left)
         form = QFormLayout()
         self._outlier_method = QComboBox()
-        self._outlier_method.addItem("IQR (1.5×)", "iqr")
+        self._outlier_method.addItem("IQR", "iqr")
         self._outlier_method.addItem("Z-score", "zscore")
         self._outlier_method.addItem("Isolation Forest", "isolation_forest")
-        form.addRow("방식:", self._outlier_method)
+        method_wrap = QWidget()
+        method_row = QHBoxLayout(method_wrap)
+        method_row.setContentsMargins(0, 0, 0, 0)
+        method_row.addWidget(self._outlier_method, stretch=1)
+        # 방식에 따라 설명이 바뀌는 ! 하나
+        self._outlier_method_help = help_tip_badge(method_wrap, "iqr")
+        method_row.addWidget(self._outlier_method_help)
+        form.addRow("방식:", method_wrap)
+        self._outlier_iqr_k = QDoubleSpinBox()
+        self._outlier_iqr_k.setRange(0.5, 5.0)
+        self._outlier_iqr_k.setValue(1.5)
+        self._outlier_iqr_k.setSingleStep(0.1)
+        self._outlier_iqr_k.setDecimals(2)
+        iqr_wrap = QWidget()
+        iqr_row = QHBoxLayout(iqr_wrap)
+        iqr_row.setContentsMargins(0, 0, 0, 0)
+        iqr_row.addWidget(self._outlier_iqr_k, stretch=1)
+        iqr_row.addWidget(help_tip_badge(iqr_wrap, "iqr_k"))
+        form.addRow("IQR 배수 k:", iqr_wrap)
         self._outlier_z = QDoubleSpinBox()
         self._outlier_z.setRange(1.0, 10.0)
         self._outlier_z.setValue(3.0)
         self._outlier_z.setSingleStep(0.5)
-        form.addRow("Z 임계값:", self._outlier_z)
+        z_wrap = QWidget()
+        z_row = QHBoxLayout(z_wrap)
+        z_row.setContentsMargins(0, 0, 0, 0)
+        z_row.addWidget(self._outlier_z, stretch=1)
+        z_row.addWidget(help_tip_badge(z_wrap, "z_threshold"))
+        form.addRow("Z 임계값:", z_wrap)
         self._outlier_contamination = QDoubleSpinBox()
         self._outlier_contamination.setRange(0.01, 0.5)
         self._outlier_contamination.setValue(0.05)
         self._outlier_contamination.setSingleStep(0.01)
-        form.addRow("IF 오염도:", self._outlier_contamination)
+        cont_wrap = QWidget()
+        cont_row = QHBoxLayout(cont_wrap)
+        cont_row.setContentsMargins(0, 0, 0, 0)
+        cont_row.addWidget(self._outlier_contamination, stretch=1)
+        cont_row.addWidget(help_tip_badge(cont_wrap, "contamination"))
+        form.addRow("IF 오염도:", cont_wrap)
         self._outlier_method.currentIndexChanged.connect(self._sync_outlier_option_visibility)
         left_layout.addLayout(form)
-        left_layout.addWidget(QLabel("대상 열 (숫자, 다중 선택):"))
+        left_layout.addWidget(QLabel("대상 열 (숫자, 다중 선택 · 비우면 전체):"))
         self._outlier_cols = QListWidget()
         self._outlier_cols.setSelectionMode(QAbstractItemView.SelectionMode.MultiSelection)
         left_layout.addWidget(self._outlier_cols)
@@ -689,7 +847,7 @@ class AnalysisPanel(QWidget):
         self._outlier_sample.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
         left_layout.addWidget(self._outlier_sample, stretch=1)
         splitter.addWidget(left)
-        self._outlier_canvas = MplCanvas(page, self._chart_style, height=3)
+        self._outlier_canvas = self._new_chart_canvas(page, height=3)
         splitter.addWidget(self._outlier_canvas)
         splitter.setStretchFactor(0, 1)
         splitter.setStretchFactor(1, 2)
@@ -766,6 +924,15 @@ class AnalysisPanel(QWidget):
     def _on_tab_changed(self, _index: int) -> None:
         if self._df is None or not self._deps_ok:
             return
+        if should_defer_analysis_charts(len(self._df), len(self._df.columns)):
+            msg = self._defer_message()
+            if hasattr(self, "_uni_sample_label"):
+                self._uni_sample_label.setText(msg)
+            if hasattr(self, "_bi_sample_label"):
+                self._bi_sample_label.setText(msg)
+            if hasattr(self, "_multi_hint"):
+                self._multi_hint.setText(msg + " · [지금 그리기] 또는 [분석 새로고침]을 누르세요.")
+            return
         self._draw_active_tab_chart()
 
     def _draw_active_tab_chart(self) -> None:
@@ -775,7 +942,7 @@ class AnalysisPanel(QWidget):
         elif idx == 2:
             self._draw_bivariate()
         elif idx == 3:
-            pass
+            self._draw_multivariate()
         elif idx == 4:
             self._draw_missing_chart()
         elif idx == 5:
@@ -789,8 +956,17 @@ class AnalysisPanel(QWidget):
 
     def _sync_outlier_option_visibility(self) -> None:
         method = self._outlier_method.currentData()
+        if hasattr(self, "_outlier_iqr_k"):
+            self._outlier_iqr_k.setEnabled(method == "iqr")
         self._outlier_z.setEnabled(method == "zscore")
         self._outlier_contamination.setEnabled(method == "isolation_forest")
+        if hasattr(self, "_outlier_method_help"):
+            tip_key = {
+                "iqr": "iqr",
+                "zscore": "zscore",
+                "isolation_forest": "isolation_forest",
+            }.get(method, "outlier_method")
+            self._outlier_method_help.set_key(tip_key)
 
     def _run_eda_summary(self) -> None:
         if not self._deps_ok:
@@ -864,13 +1040,23 @@ class AnalysisPanel(QWidget):
             self._overview_table.setItem(
                 i, 7, _readonly_item(format_stat_number(col.std) if col.std is not None else "—")
             )
+            self._overview_table.setItem(
+                i,
+                8,
+                _readonly_item(format_stat_number(col.min_val) if col.min_val is not None else "—"),
+            )
+            self._overview_table.setItem(
+                i,
+                9,
+                _readonly_item(format_stat_number(col.max_val) if col.max_val is not None else "—"),
+            )
 
     def _refresh_overview(self) -> None:
         self._refresh_overview_table()
         self._draw_missing_overview_chart()
 
     def _draw_missing_overview_chart(self) -> None:
-        if self._df is None:
+        if self._df is None or not self._canvas_ok(self._overview_canvas):
             return
         data = missing_summary(self._df)[:20]
         canvas = self._overview_canvas
@@ -894,7 +1080,12 @@ class AnalysisPanel(QWidget):
             ax.invert_yaxis()
             ax.tick_params(axis="y", labelsize=max(6, st.tick_font_size - 2), pad=2)
             ax.margins(y=0.02)
-            self._apply_axis_limits(ax, "uni", x_vals=pcts)
+            # 개요 차트는 단변량 축 설정과 분리 (공유 시 오염 방지)
+            xs = pd.Series(pcts)
+            xlo, xhi = nice_axis_limits(float(xs.min()), float(xs.max()))
+            if float(xs.min()) >= 0 and xlo < 0:
+                xlo = 0.0
+            ax.set_xlim(xlo, xhi)
             self._format_numeric_axis(ax, axis="x")
             canvas.fig.subplots_adjust(left=0.14, right=0.98, top=0.88, bottom=0.15)
         canvas.draw()
@@ -996,7 +1187,7 @@ class AnalysisPanel(QWidget):
         return text
 
     def _draw_univariate(self) -> None:
-        if self._df is None:
+        if self._df is None or not self._canvas_ok(self._uni_canvas):
             return
         col_name = self._uni_col.currentText()
         series = self._resolve_series(col_name)
@@ -1219,7 +1410,7 @@ class AnalysisPanel(QWidget):
             self._bi_stats_label.setText(f"{x_name} × {y_name} — 교차표 (범주 × 범주)")
 
     def _draw_bivariate(self) -> None:
-        if self._df is None:
+        if self._df is None or not self._canvas_ok(self._bi_canvas):
             return
         x_name = self._bi_x.currentText()
         y_name = self._bi_y.currentText()
@@ -1354,7 +1545,7 @@ class AnalysisPanel(QWidget):
         canvas.finish_chart()
 
     def _draw_multivariate(self) -> None:
-        if self._df is None:
+        if self._df is None or not self._canvas_ok(self._multi_canvas):
             return
         cols = self._selected_list_items(self._multi_cols)
         if not cols:
@@ -1384,12 +1575,13 @@ class AnalysisPanel(QWidget):
         canvas.finish_chart()
 
     def _draw_pair_plot(self) -> None:
-        if self._df is None:
+        if self._df is None or not self._canvas_ok(self._multi_canvas):
             return
         cols = self._selected_list_items(self._multi_cols)
         if not cols:
             cols = numeric_columns(self._df)
-        cols = cols[:4]
+        max_cols = self._pair_max_cols.value() if hasattr(self, "_pair_max_cols") else 4
+        cols = cols[:max_cols]
         if len(cols) < 2:
             QMessageBox.information(self, "Pair plot", "숫자 열 2개 이상 선택하세요.")
             return
@@ -1441,7 +1633,9 @@ class AnalysisPanel(QWidget):
         canvas.finish_chart()
 
     def _draw_pca(self) -> None:
-        if self._df is None:
+        if self._df is None or not self._canvas_ok(self._multi_canvas):
+            return
+        if not require(self, sklearn_available(), "sklearn", feature="PCA"):
             return
         cols = self._selected_list_items(self._multi_cols)
         if not cols:
@@ -1469,7 +1663,7 @@ class AnalysisPanel(QWidget):
         canvas.finish_chart()
 
     def _draw_missing_chart(self) -> None:
-        if self._df is None:
+        if self._df is None or not self._canvas_ok(self._missing_canvas):
             return
         data = missing_summary(self._df)[:15]
         canvas = self._missing_canvas
@@ -1490,21 +1684,22 @@ class AnalysisPanel(QWidget):
         if self._df is None:
             self._missing_preview.setText("미리보기: 데이터 없음")
             return
-        cols = self._selected_list_items(self._missing_cols)
-        if not cols:
-            cols = numeric_columns(self._df)
-        before, _, targets = knn_fill_preview(self._df, cols)
+        selected = self._selected_list_items(self._missing_cols)
+        cols = selected or numeric_columns(self._df)
+        before, _after, targets = knn_fill_preview(self._df, cols)
         if not targets:
             self._missing_preview.setText("미리보기: 숫자 열이 없습니다.")
             return
         cells = len(self._df) * len(targets)
         warn = ""
         if cells > 100_000:
-            warn = "\n⚠ 대용량 데이터 — KNN 적용에 시간이 걸릴 수 있습니다."
+            warn = "\n⚠ 대용량 데이터 — KNN/MICE 적용에 시간이 걸릴 수 있습니다."
+        scope = "선택 열" if selected else "숫자 열 전체(미선택)"
         self._missing_preview.setText(
-            f"미리보기: 대상 열 {len(targets)}개 ({', '.join(targets[:5])}"
-            f"{'…' if len(targets) > 5 else ''})\n"
-            f"결측 {before:,}개 → KNN 대체 후 0개 (숫자 열만){warn}"
+            f"미리보기 ({scope}): 대상 {len(targets)}개 "
+            f"({', '.join(targets[:5])}{'…' if len(targets) > 5 else ''})\n"
+            f"현재 결측 {before:,}개 — 적용 시 KNN/MICE로 숫자 열 결측을 채웁니다.\n"
+            f"(미리보기는 대상·건수만 표시하며, 실제 채우기는 [적용]에서 실행됩니다.){warn}"
         )
 
     def _on_worker_error(self, message: str) -> None:
@@ -1517,11 +1712,12 @@ class AnalysisPanel(QWidget):
             return
         if not require(self, sklearn_available(), "sklearn", feature="KNN 대체"):
             return
-        cols = self._selected_list_items(self._missing_cols)
-        if not cols:
-            cols = numeric_columns(self._df)
+        selected = self._selected_list_items(self._missing_cols)
+        cols = selected or numeric_columns(self._df)
         if not cols:
             QMessageBox.warning(self, "KNN 대체", "숫자 열을 선택하세요.")
+            return
+        if not selected and not self._confirm_all_numeric_apply("KNN 대체", "KNN 결측 채우기를", len(cols)):
             return
         df = self._df.copy(deep=True)
         n_neighbors = self._knn_neighbors.value()
@@ -1544,20 +1740,22 @@ class AnalysisPanel(QWidget):
             return
         if not require(self, sklearn_available(), "sklearn", feature="MICE 대체"):
             return
-        cols = self._selected_list_items(self._missing_cols)
-        if not cols:
-            cols = numeric_columns(self._df)
+        selected = self._selected_list_items(self._missing_cols)
+        cols = selected or numeric_columns(self._df)
         if not cols:
             QMessageBox.warning(self, "MICE 대체", "숫자 열을 선택하세요.")
             return
+        if not selected and not self._confirm_all_numeric_apply("MICE 대체", "MICE 결측 채우기를", len(cols)):
+            return
         df = self._df.copy(deep=True)
+        max_iter = self._mice_max_iter.value() if hasattr(self, "_mice_max_iter") else 10
         self._missing_preview.setText("MICE 적용 중…")
 
         def work():
-            return fill_na_mice(df, cols)
+            return fill_na_mice(df, cols, max_iter=max_iter)
 
         def on_ok(result) -> None:
-            msg = f"MICE 결측 대체 (열 {len(cols)}개)"
+            msg = f"MICE 결측 대체 (iter={max_iter}, 열 {len(cols)}개)"
             self._on_apply(result, msg)
             if self._on_log:
                 self._on_log("success", msg, f"{len(cols)}개 숫자 열")
@@ -1595,12 +1793,13 @@ class AnalysisPanel(QWidget):
 
         run_analysis_task(self, work, _done, _fail)
 
-    def _outlier_params(self) -> tuple[list[str], str, float, float]:
+    def _outlier_params(self) -> tuple[list[str], str, float, float, float]:
         cols = self._selected_list_items(self._outlier_cols)
         if not cols and self._df is not None:
             cols = numeric_columns(self._df)
         method = self._outlier_method.currentData()
-        return cols, method, self._outlier_z.value(), self._outlier_contamination.value()
+        iqr_k = self._outlier_iqr_k.value() if hasattr(self, "_outlier_iqr_k") else 1.5
+        return cols, method, self._outlier_z.value(), self._outlier_contamination.value(), iqr_k
 
     def _compute_outlier_preview(
         self,
@@ -1609,20 +1808,28 @@ class AnalysisPanel(QWidget):
         method: str,
         z: float,
         contam: float,
+        iqr_k: float = 1.5,
     ) -> dict:
         from df_tool.operations import outlier_row_mask
 
         if not cols:
             return {"error": "no_cols"}
-        summary = outlier_summary(df, cols, method, z_threshold=z, contamination=contam)
-        row_count = count_outlier_rows(df, cols, method, z_threshold=z, contamination=contam)
-        mask = outlier_row_mask(df, cols, method, z_threshold=z, contamination=contam)
+        summary = outlier_summary(
+            df, cols, method, z_threshold=z, contamination=contam, iqr_k=iqr_k
+        )
+        row_count = count_outlier_rows(
+            df, cols, method, z_threshold=z, contamination=contam, iqr_k=iqr_k
+        )
+        mask = outlier_row_mask(
+            df, cols, method, z_threshold=z, contamination=contam, iqr_k=iqr_k
+        )
         return {
             "summary": summary,
             "row_count": row_count,
             "mask": mask,
             "cols": cols,
             "method": method,
+            "iqr_k": iqr_k,
             "row_total": len(df),
         }
 
@@ -1630,7 +1837,7 @@ class AnalysisPanel(QWidget):
         if self._df is None:
             self._outlier_preview.setText("미리보기: 데이터 없음")
             return
-        cols, method, z, contam = self._outlier_params()
+        cols, method, z, contam, iqr_k = self._outlier_params()
         if not cols:
             self._outlier_preview.setText("미리보기: 숫자 열이 없습니다.")
             return
@@ -1653,8 +1860,11 @@ class AnalysisPanel(QWidget):
             hint = ""
             if method == "isolation_forest" and row_total < 10:
                 hint = "\n※ Isolation Forest는 유효 행 10개 이상에서 동작합니다."
+            method_label = method
+            if method == "iqr":
+                method_label = f"IQR(k={payload.get('iqr_k', 1.5):.2f})"
             self._outlier_preview.setText(
-                f"미리보기 ({method}): 제거 예상 행 {row_count:,}개 / {row_total:,}행\n"
+                f"미리보기 ({method_label}): 제거 예상 행 {row_count:,}개 / {row_total:,}행\n"
                 + "\n".join(lines)
                 + hint
             )
@@ -1662,7 +1872,7 @@ class AnalysisPanel(QWidget):
             self._draw_outlier_boxplot(cols[0])
 
         self._run_analysis_task(
-            lambda: self._compute_outlier_preview(df, cols, method, z, contam),
+            lambda: self._compute_outlier_preview(df, cols, method, z, contam, iqr_k),
             on_ok,
             progress="이상치 미리보기…",
         )
@@ -1684,7 +1894,7 @@ class AnalysisPanel(QWidget):
                 self._outlier_sample.setItem(r, c, _readonly_item(text))
 
     def _draw_outlier_boxplot(self, col_name: str) -> None:
-        if self._df is None:
+        if self._df is None or not self._canvas_ok(self._outlier_canvas):
             return
         key = resolve_column_key(self._df, col_name)
         if key is None:
@@ -1709,15 +1919,19 @@ class AnalysisPanel(QWidget):
     def _apply_outliers(self) -> None:
         if self._df is None:
             return
-        cols = self._selected_list_items(self._outlier_cols)
-        if not cols:
-            cols = numeric_columns(self._df)
+        selected = self._selected_list_items(self._outlier_cols)
+        cols = selected or numeric_columns(self._df)
         if not cols:
             QMessageBox.warning(self, "이상치 제거", "숫자 열을 선택하세요.")
+            return
+        if not selected and not self._confirm_all_numeric_apply(
+            "이상치 제거", "이상치 행 제거를", len(cols)
+        ):
             return
         method = self._outlier_method.currentData()
         z = self._outlier_z.value()
         contam = self._outlier_contamination.value()
+        iqr_k = self._outlier_iqr_k.value() if hasattr(self, "_outlier_iqr_k") else 1.5
         if method == "isolation_forest" and not require(self, sklearn_available(), "sklearn", feature="Isolation Forest", title="이상치 제거"):
             return
         if method == "isolation_forest" and len(self._df) < 10:
@@ -1731,7 +1945,9 @@ class AnalysisPanel(QWidget):
         self._outlier_preview.setText("이상치 제거 적용 중…")
 
         def work():
-            return drop_outlier_rows(df, cols, method, z_threshold=z, contamination=contam)
+            return drop_outlier_rows(
+                df, cols, method, z_threshold=z, contamination=contam, iqr_k=iqr_k
+            )
 
         def on_ok(payload) -> None:
             result, removed, _ = payload
@@ -1740,7 +1956,7 @@ class AnalysisPanel(QWidget):
                 self._preview_outliers_async()
                 return
             if method == "iqr":
-                label = "IQR"
+                label = f"IQR(k={iqr_k:.2f})"
             elif method == "isolation_forest":
                 label = f"IF({contam})"
             else:

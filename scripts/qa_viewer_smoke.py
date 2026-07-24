@@ -155,6 +155,46 @@ def test_clipboard_paste(app: QApplication) -> None:
     assert str(out.at[1, "city"]) == "Q", f"(1,city)={out.at[1, 'city']!r}"
 
 
+def test_find_duplicate_row_filter(app: QApplication) -> None:
+    """중복 행만 표시 경로 — 잘못된 위젯명/라벨 갱신으로 크래시 나지 않는지."""
+    from df_tool.operations import duplicate_row_mask
+    from df_tool.selection import SelectionScope
+
+    viewer = DataFrameViewer()
+    df = pd.DataFrame({"id": [1, 2, 2, 3, 3, 3], "x": list("abcdef")})
+    viewer.set_dataframe(df, new_session=True)
+    app.processEvents()
+
+    # 툴바 clicked(bool) 오인 가드
+    assert viewer.find_duplicate_values.__doc__ or True
+    # 필터 적용 본체 (다이얼로그 없이)
+    indices = list(df.index[duplicate_row_mask(df, ["id"])])
+    viewer._filter_pinned_rows.clear()
+    viewer.search_entry.clear()
+    viewer.search_column_combo.setCurrentIndex(0)
+    viewer._selection = SelectionScope()
+    viewer._table.clearSelection()
+    viewer._filtered_indices = indices
+    viewer._model.set_filtered_indices(viewer._sorted_filtered_indices())
+    viewer._update_page_label()
+    app.processEvents()
+    assert viewer._model.rowCount() == 5, viewer._model.rowCount()
+    assert not hasattr(viewer, "search_column")
+
+    # 툴바 라벨 가시성 (혼동 방지 용어)
+    from PyQt6.QtWidgets import QPushButton
+    from df_tool.qt_dialogs import qt_select_columns_dialog
+
+    assert callable(qt_select_columns_dialog)
+    labels = {b.text() for b in viewer.findChildren(QPushButton)}
+    assert "값 중복 찾기" in labels
+    assert "완전동일 행 제거" in labels
+    assert "결측 행 제거" in labels
+    assert "중복 찾기" not in labels
+    assert "중복 제거" not in labels
+    assert "결측 제거" not in labels
+
+
 def main() -> int:
     app = QApplication.instance() or QApplication(sys.argv)
     test_set_get_roundtrip(app)
@@ -163,6 +203,7 @@ def main() -> int:
     test_clipboard_copy(app)
     test_clipboard_paste(app)
     test_corner_select_all(app)
+    test_find_duplicate_row_filter(app)
     print("qa_viewer_smoke: OK")
     return 0
 

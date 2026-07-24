@@ -8,7 +8,7 @@ from __future__ import annotations
 import pandas as pd
 
 
-def _outlier_mask_iqr(series: pd.Series) -> pd.Series:
+def _outlier_mask_iqr(series: pd.Series, *, iqr_k: float = 1.5) -> pd.Series:
     import df_tool.operations as ops
 
     valid = series[~ops.null_mask(series)].astype(float)
@@ -19,8 +19,9 @@ def _outlier_mask_iqr(series: pd.Series) -> pd.Series:
     iqr = q3 - q1
     if iqr == 0:
         return pd.Series(False, index=series.index)
-    low = q1 - 1.5 * iqr
-    high = q3 + 1.5 * iqr
+    k = max(0.1, float(iqr_k))
+    low = q1 - k * iqr
+    high = q3 + k * iqr
     numeric = pd.to_numeric(series, errors="coerce")
     return (numeric < low) | (numeric > high)
 
@@ -71,6 +72,7 @@ def outlier_row_mask(
     *,
     z_threshold: float = 3.0,
     contamination: float = 0.05,
+    iqr_k: float = 1.5,
 ) -> pd.Series:
     """선택 열 중 하나라도 이상치이면 True."""
     import df_tool.operations as ops
@@ -84,7 +86,7 @@ def outlier_row_mask(
     combined = pd.Series(False, index=df.index)
     for key in numeric_keys:
         if method == "iqr":
-            col_mask = _outlier_mask_iqr(df[key])
+            col_mask = _outlier_mask_iqr(df[key], iqr_k=iqr_k)
         elif method == "zscore":
             col_mask = _outlier_mask_zscore(df[key], z_threshold=z_threshold)
         else:
@@ -100,10 +102,16 @@ def drop_outlier_rows(
     *,
     z_threshold: float = 3.0,
     contamination: float = 0.05,
+    iqr_k: float = 1.5,
 ) -> tuple[pd.DataFrame, int, pd.Series]:
     """이상치 행 제거. (결과 df, 제거 건수, 이상치 마스크) 반환."""
     mask = outlier_row_mask(
-        df, columns, method, z_threshold=z_threshold, contamination=contamination
+        df,
+        columns,
+        method,
+        z_threshold=z_threshold,
+        contamination=contamination,
+        iqr_k=iqr_k,
     )
     removed = int(mask.sum())
     return df.loc[~mask].copy(), removed, mask

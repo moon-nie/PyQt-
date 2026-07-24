@@ -26,7 +26,8 @@ from df_tool.analysis import (
 )
 from df_tool.analysis_deps import analysis_deps_message, sklearn_available
 from df_tool.analysis import compute_pca
-from df_tool.eda_report import build_eda_html
+from df_tool.analysis_help import tip_text
+from df_tool.eda_report import build_eda_html, default_eda_report_filename
 from df_tool.operations import column_fill_na_methods, drop_outlier_rows, fill_na_knn, fill_na_mice
 from df_tool.chart_style import ChartStyle, reset_chart_style, save_chart_style
 from df_tool.performance import should_defer_analysis_charts
@@ -80,6 +81,16 @@ def main() -> int:
     assert "1,500,000" in big
     lo, hi = nice_axis_limits(10, 20)
     assert lo < 10 and hi > 20
+
+    assert "구간" in tip_text("bins") and "사분위" in tip_text("iqr")
+    assert "Z" in tip_text("zscore") and "이웃" in tip_text("n_neighbors")
+    from df_tool.analysis import knn_fill_preview
+
+    before, after, targets = knn_fill_preview(df, ["age"])
+    assert before >= 1 and after is None and "age" in targets
+
+    outlier_k = drop_outlier_rows(df, ["age"], "iqr", iqr_k=3.0)
+    assert len(outlier_k[0]) <= len(df)
 
     filled = fill_na_knn(df, ["age", "score"], n_neighbors=2)
     assert filled["age"].notna().all()
@@ -135,10 +146,19 @@ def main() -> int:
     assert loaded.resolve_title("자동") == "테스트"
     reset_chart_style()
 
-    html = build_eda_html(df)
+    assert default_eda_report_filename("a/b/foo.csv") == "foo_report.html"
+    assert default_eda_report_filename(None) == "untitled_report.html"
+    html = build_eda_html(df, title="sample — EDA 리포트", source_name="sample.csv")
     assert "<table>" in html and "age" in html
     assert "data:image/png;base64" in html
     assert "무작위 표본" in html
+    assert "핵심 인사이트" in html
+    assert "요약 KPI" in html
+    assert "범주형 요약" in html
+    assert "이상치 요약" in html
+    assert "sample.csv" in html
+    assert "age 분포" in html and "score 분포" in html
+    assert "city 상위 범주" in html or "city" in html
 
     pca = compute_pca(df, ["age", "score"])
     assert pca is not None and len(pca.explained_variance_ratio) >= 2

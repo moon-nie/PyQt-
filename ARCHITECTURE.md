@@ -92,7 +92,7 @@ Gridloom의 모든 코드는 아래 3개 층 중 하나에 속합니다. **이 3
 3) operations.py 의 drop_duplicates(df) 호출   ← 순수 계산
         │   - df.copy() 후 중복 제거한 새 DataFrame 반환 (원본 안 건드림)
         │
-4) qt_app._apply_dataframe(new_df, "중복 제거")
+4) qt_app._apply_dataframe(new_df, "완전동일 행 제거")
         │   - undo 스택에 직전 상태 push (Ctrl+Z 가능)
         │   - viewer.set_dataframe(new_df) 로 화면 갱신
         │   - info 패널·작업 로그 갱신

@@ -135,9 +135,37 @@ def main() -> int:
         pass
 
     from df_tool.analysis_deps import webengine_available
+    from df_tool.crawl_presets import CrawlPreset, delete_preset, load_presets, upsert_preset
+    import tempfile
+    from pathlib import Path
 
     # WebEngine은 선택 설치 — 가용성 함수만 확인 (headless에서 창 생성은 스킵)
     assert isinstance(webengine_available(), bool)
+
+    # 프리셋 저장/불러오기 (임시 파일)
+    with tempfile.TemporaryDirectory() as tmp:
+        path = Path(tmp) / "crawl_presets.json"
+        preset = CrawlPreset(
+            name="테스트규칙",
+            url="https://example.com",
+            selector="ul li",
+            batch_template="https://example.com/{code}",
+            batch_param_key="code",
+            batch_fields="이름|.title|text",
+        )
+        upsert_preset(preset, path)
+        loaded = load_presets(path)
+        assert len(loaded) == 1 and loaded[0].name == "테스트규칙"
+        assert loaded[0].selector == "ul li"
+        delete_preset("테스트규칙", path)
+        assert load_presets(path) == []
+
+    # WebEngine 인스턴스 생성은 headless에서 크래시할 수 있어 API 존재만 확인
+    if webengine_available():
+        from df_tool.qt_webengine_crawl import RenderedHtmlFetcher
+
+        assert callable(getattr(RenderedHtmlFetcher, "cancel", None))
+        assert hasattr(RenderedHtmlFetcher, "busy")
 
     print("qa_crawl_smoke: OK")
     return 0

@@ -89,6 +89,21 @@ class RenderedHtmlFetcher(QObject):
     def busy(self) -> bool:
         return self._busy
 
+    def cancel(self) -> None:
+        """진행 중 fetch를 중단합니다. 콜백은 호출하지 않습니다."""
+        if not self._busy:
+            return
+        self._busy = False
+        self._timer.stop()
+        self._hard_timer.stop()
+        self._callback = None
+        try:
+            from PyQt6.QtWebEngineCore import QWebEnginePage
+
+            self._view.page().triggerAction(QWebEnginePage.WebAction.Stop)
+        except Exception:
+            pass
+
     def fetch(
         self,
         url: str,

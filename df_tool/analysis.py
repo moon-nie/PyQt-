@@ -336,6 +336,7 @@ def outlier_summary(
     *,
     z_threshold: float = 3.0,
     contamination: float = 0.05,
+    iqr_k: float = 1.5,
 ) -> list[tuple[str, int, float]]:
     """열별 이상치 건수·비율."""
     if method == "isolation_forest":
@@ -352,7 +353,7 @@ def outlier_summary(
         if method == "iqr":
             from df_tool.operations import _outlier_mask_iqr
 
-            mask = _outlier_mask_iqr(df[key])
+            mask = _outlier_mask_iqr(df[key], iqr_k=iqr_k)
         else:
             from df_tool.operations import _outlier_mask_zscore
 
@@ -370,10 +371,16 @@ def count_outlier_rows(
     *,
     z_threshold: float = 3.0,
     contamination: float = 0.05,
+    iqr_k: float = 1.5,
 ) -> int:
     return int(
         outlier_row_mask(
-            df, columns, method, z_threshold=z_threshold, contamination=contamination
+            df,
+            columns,
+            method,
+            z_threshold=z_threshold,
+            contamination=contamination,
+            iqr_k=iqr_k,
         ).sum()
     )
 
@@ -381,14 +388,18 @@ def count_outlier_rows(
 def knn_fill_preview(
     df: pd.DataFrame,
     columns: list[str],
-) -> tuple[int, int, list[str]]:
-    """KNN 적용 전/후 결측 건수, 대상 열 목록."""
+) -> tuple[int, int | None, list[str]]:
+    """KNN 대상 열·적용 전 결측 건수.
+
+    두 번째 값(after)은 미리보기에서 실제 impute를 돌리지 않으므로 항상 ``None``.
+    (UI는 ‘적용 시 채움’으로 안내해야 함 — 예전에 before를 after로 쓰던 오해 방지.)
+    """
     from df_tool.operations import resolve_column_keys
 
     keys = resolve_column_keys(df, columns)
     numeric_keys = [k for k in keys if column_supports_numeric_fill(df[k])]
     before = sum(count_nulls(df[k]) for k in numeric_keys)
-    return before, before, [str(k) for k in numeric_keys]
+    return before, None, [str(k) for k in numeric_keys]
 
 
 def default_univariate_column(df: pd.DataFrame) -> str | None:

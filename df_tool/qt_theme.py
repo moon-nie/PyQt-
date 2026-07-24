@@ -99,6 +99,15 @@ def app_stylesheet() -> str:
     QSplitter::handle:vertical {{
         height: 2px;
     }}
+    /* 전역 QWidget 규칙이 QToolTip에도 적용되면 설명이 안 보이거나 깨짐 — 명시 스타일 필수 */
+    QToolTip {{
+        background: {c['surface']};
+        color: {c['text']};
+        border: 1px solid {c['border']};
+        padding: 8px 10px;
+        border-radius: 4px;
+        font-size: 10pt;
+    }}
     """
 
 

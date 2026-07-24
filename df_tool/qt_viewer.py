@@ -105,9 +105,17 @@ class DataFrameViewer(QWidget):
         self._bind_events()
 
     @staticmethod
-    def _add_action_btn(row: QHBoxLayout, label: str, callback: Callable[[], None] | None) -> None:
+    def _add_action_btn(
+        row: QHBoxLayout,
+        label: str,
+        callback: Callable[[], None] | None,
+        *,
+        tooltip: str = "",
+    ) -> None:
         btn = QPushButton(label)
         btn.setEnabled(callback is not None)
+        if tooltip:
+            btn.setToolTip(tooltip)
         if callback:
             btn.clicked.connect(callback)
         row.addWidget(btn)
@@ -180,9 +188,34 @@ class DataFrameViewer(QWidget):
         self._add_action_btn(action_row, "병합", self.on_concat)
         action_row.addStretch()
         self._add_action_btn(action_row, "그룹", self.on_group_summary)
-        self._add_action_btn(action_row, "결측 채우기", self.on_fill_na)
-        self._add_action_btn(action_row, "결측 제거", self.on_drop_na_rows)
-        self._add_action_btn(action_row, "중복 제거", self.on_drop_duplicates)
+        self._add_action_btn(
+            action_row,
+            "결측 채우기",
+            self.on_fill_na,
+            tooltip="선택한 열의 빈 칸(결측)을 채웁니다.",
+        )
+        self._add_action_btn(
+            action_row,
+            "결측 행 제거",
+            self.on_drop_na_rows,
+            tooltip="빈 칸(결측)이 하나라도 있는 행을 통째로 삭제합니다.",
+        )
+        self._add_action_btn(
+            action_row,
+            "값 중복 찾기",
+            lambda: self.find_duplicate_values(),
+            tooltip=(
+                "선택한 열(여러 개 가능)을 각각 검사해 값 중복을 한눈에 보여 줍니다.\n"
+                "예: 아이디·이메일을 고르면 열마다 ‘중복 있음/없음’을 따로 표시.\n"
+                "※ 완전 동일 행 삭제와는 다릅니다."
+            ),
+        )
+        self._add_action_btn(
+            action_row,
+            "완전동일 행 제거",
+            self.on_drop_duplicates,
+            tooltip="모든 열 값이 완전히 같은 행을 하나만 남기고 삭제합니다.",
+        )
         self._add_action_btn(action_row, "+ 열", self.on_add_column)
         layout.addLayout(action_row)
 
@@ -940,6 +973,99 @@ class DataFrameViewer(QWidget):
             parts.append(f"정렬: {self._sort_column} {arrow}")
         self.page_label.setText(" · ".join(parts))
 
+    def find_duplicate_values(self, column: str | None = None) -> None:
+        """선택한 열을 각각 검사해 값 중복을 한 화면에 보여 줍니다.
+
+        여러 열은 조합 키가 아니라 **열마다 따로** 집계합니다.
+        툴바 버튼의 ``clicked(bool)`` 시그널이 넘어오면 열 인자로 오인하지 않도록
+        bool은 무시합니다.
+        """
+        if isinstance(column, bool):
+            column = None
+        if self._df is None or self._df.empty:
+            QMessageBox.information(self, "값 중복 찾기", "데이터가 없습니다.")
+            return
+        from df_tool.operations import duplicate_row_mask, duplicate_value_reports
+        from df_tool.qt_dialogs import qt_duplicate_reports_dialog, qt_select_columns_dialog
+
+        all_cols = [str(c) for c in self._df.columns]
+        if column is not None:
+            if (
+                self._has_column_selection()
+                and column in self._selection.columns
+                and len(self._selection.columns) >= 2
+            ):
+                cols = [str(c) for c in self._sorted_columns(self._selection.columns)]
+            else:
+                cols = [str(column)]
+        elif self._has_column_selection() and self._selection.columns:
+            cols = [str(c) for c in self._sorted_columns(self._selection.columns)]
+        else:
+            picked = qt_select_columns_dialog(
+                self,
+                "값 중복 찾기 — 열 선택",
+                "검사할 열을 고르세요. 여러 열을 고르면 각 열을 따로 검사해\n"
+                "한 화면에 ‘아이디에 중복 있음 / 이메일에 중복 있음’처럼 보여 줍니다.\n"
+                "(이름+전화 같은 조합 키가 아닙니다.)",
+                all_cols,
+                confirm_text="찾기",
+                min_count=1,
+            )
+            if not picked:
+                return
+            cols = picked
+
+        try:
+            reports = duplicate_value_reports(self._df, cols)
+        except ValueError as exc:
+            QMessageBox.warning(self, "값 중복 찾기", str(exc))
+            return
+
+        filter_cols = qt_duplicate_reports_dialog(self, reports)
+        if not filter_cols:
+            return
+
+        by_col = {r.column: r for r in reports}
+
+        def _apply_duplicate_filter() -> None:
+            if self._df is None:
+                return
+            try:
+                mask = duplicate_row_mask(self._df, filter_cols)
+                indices = list(self._df.index[mask])
+            except Exception as exc:
+                QMessageBox.warning(self, "값 중복 행 표시", str(exc))
+                return
+            self._filter_pinned_rows.clear()
+            self.search_entry.blockSignals(True)
+            self.search_entry.clear()
+            self.search_entry.blockSignals(False)
+            self.search_column_combo.blockSignals(True)
+            self.search_column_combo.setCurrentIndex(0)
+            self.search_column_combo.blockSignals(False)
+            self._selection = SelectionScope()
+            self._active_cell = None
+            self._table.clearSelection()
+            self._filtered_indices = indices
+            self._model.set_filtered_indices(self._sorted_filtered_indices())
+            self._update_page_label()
+            if self.on_selection_change:
+                self.on_selection_change(self._selection)
+            scope = ", ".join(filter_cols)
+            parts = []
+            for name in filter_cols:
+                rep = by_col.get(name)
+                if rep:
+                    parts.append(f"{name} 중복값 {rep.duplicate_value_count:,}")
+            detail = " · ".join(parts) if parts else ""
+            msg = f"값 중복 행 {len(indices):,}개 표시 [{scope}]"
+            if detail:
+                msg = f"{msg} ({detail})"
+            if self.on_action:
+                self.on_action(msg)
+
+        QTimer.singleShot(0, _apply_duplicate_filter)
+
     def _extract_filtered_rows(self) -> None:
         """검색·필터로 보이는 행만 데이터로 남깁니다 (operations.extract_rows SSOT)."""
         if self._df is None:
@@ -1581,6 +1707,16 @@ class DataFrameViewer(QWidget):
             "열 분리…",
             lambda: self._defer_action(self._split_column, column),
         )
+        menu.addAction(
+            "값 중복 찾기…",
+            lambda: self._defer_action(self.find_duplicate_values, column),
+        )
+        if self._has_column_selection() and len(self._selection.columns) >= 2:
+            n = len(self._selection.columns)
+            menu.addAction(
+                f"선택 {n}열 각각 값 중복 찾기…",
+                lambda: self._defer_action(self.find_duplicate_values, column),
+            )
         menu.addSeparator()
         menu.addAction(
             "◀ 왼쪽에 열 추가",

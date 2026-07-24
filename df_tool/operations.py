@@ -5,6 +5,8 @@
 """
 from __future__ import annotations
 
+from dataclasses import dataclass
+
 import pandas as pd
 
 # 타입 변경 드롭다운 옵션 (pandas dtype 이름)
@@ -630,6 +632,146 @@ def fill_na(
 
 def drop_duplicates(df: pd.DataFrame, subset: list[str] | None = None) -> pd.DataFrame:
     return df.drop_duplicates(subset=subset, keep="first")
+
+
+@dataclass(frozen=True)
+class DuplicateReport:
+    """한 열의 고유/중복 요약."""
+
+    columns: tuple[str, ...]
+    total_rows: int
+    unique_count: int
+    null_count: int
+    duplicate_value_count: int
+    duplicate_row_count: int
+    duplicate_counts: tuple[tuple[str, int], ...]
+
+    @property
+    def column(self) -> str:
+        return self.columns[0] if self.columns else ""
+
+
+def duplicate_row_mask(
+    df: pd.DataFrame,
+    columns: str | list[str],
+    *,
+    dropna: bool = True,
+) -> pd.Series:
+    """해당 열 값이 2회 이상인 행은 True.
+
+    여러 열을 넘기면 **열마다** 중복을 본 뒤 OR(합집합)합니다.
+    (열 조합 키가 아닙니다.)
+
+    ``dropna=True``이면 해당 열이 결측인 행은 그 열의 중복으로 치지 않습니다
+    (정보 패널 고유값 = ``nunique(dropna=True)`` 와 같은 기준).
+    """
+    cols = [columns] if isinstance(columns, (str, int)) else list(columns)
+    keys = resolve_column_keys(df, [str(c) for c in cols])
+    if not keys:
+        raise ValueError("대상 열이 없습니다.")
+
+    mask = pd.Series(False, index=df.index)
+    for key in keys:
+        col_dup = df.duplicated(subset=[key], keep=False)
+        if dropna:
+            col_dup = col_dup & ~null_mask(df[key])
+        mask |= col_dup.fillna(False)
+    return mask.fillna(False)
+
+
+def duplicate_value_report(
+    df: pd.DataFrame,
+    column: str | list[str],
+    *,
+    dropna: bool = True,
+    max_listed: int = 500,
+) -> DuplicateReport:
+    """한 열의 고유값·중복값 요약 (예: 3341행인데 고유 3339 → 중복 진단).
+
+    여러 열은 ``duplicate_value_reports``를 쓰세요 (열마다 따로 집계).
+    호환을 위해 list가 오면 첫 열만 보고합니다.
+    """
+    if isinstance(column, (str, int)):
+        col_name = str(column)
+    else:
+        if not column:
+            raise ValueError("대상 열이 없습니다.")
+        col_name = str(column[0])
+    keys = resolve_column_keys(df, [col_name])
+    if not keys:
+        raise ValueError("대상 열이 없습니다.")
+    key = keys[0]
+    label_cols = (str(key),)
+    total = len(df)
+    series = df[key]
+    null_count = int(null_mask(series).sum())
+    unique_count = int(series.nunique(dropna=True))
+    work = series.loc[~null_mask(series)] if dropna else series
+    counts = work.value_counts(dropna=False)
+
+    if counts.empty:
+        return DuplicateReport(
+            columns=label_cols,
+            total_rows=total,
+            unique_count=unique_count,
+            null_count=null_count,
+            duplicate_value_count=0,
+            duplicate_row_count=0,
+            duplicate_counts=(),
+        )
+
+    dup_counts = counts[counts > 1]
+    duplicate_value_count = int(len(dup_counts))
+    duplicate_row_count = int(dup_counts.sum()) if duplicate_value_count else 0
+
+    listed: list[tuple[str, int]] = []
+    for value, cnt in dup_counts.items():
+        listed.append((_format_dup_value(value), int(cnt)))
+        if len(listed) >= max_listed:
+            break
+
+    return DuplicateReport(
+        columns=label_cols,
+        total_rows=total,
+        unique_count=unique_count,
+        null_count=null_count,
+        duplicate_value_count=duplicate_value_count,
+        duplicate_row_count=duplicate_row_count,
+        duplicate_counts=tuple(listed),
+    )
+
+
+def duplicate_value_reports(
+    df: pd.DataFrame,
+    columns: str | list[str],
+    *,
+    dropna: bool = True,
+    max_listed: int = 500,
+) -> tuple[DuplicateReport, ...]:
+    """선택한 열 **각각**에 대해 값 중복 요약을 만듭니다 (조합 키 아님)."""
+    cols = [columns] if isinstance(columns, (str, int)) else list(columns)
+    keys = resolve_column_keys(df, [str(c) for c in cols])
+    if not keys:
+        raise ValueError("대상 열이 없습니다.")
+    return tuple(
+        duplicate_value_report(df, str(key), dropna=dropna, max_listed=max_listed)
+        for key in keys
+    )
+
+
+def _format_dup_value(value) -> str:
+    if value is None or (isinstance(value, float) and pd.isna(value)):
+        return ""
+    try:
+        if pd.isna(value):
+            return ""
+    except (TypeError, ValueError):
+        pass
+    if isinstance(value, float) and value == int(value):
+        return str(int(value))
+    if isinstance(value, bool):
+        return str(value)
+    return str(value)
 
 
 def drop_na_rows(df: pd.DataFrame, subset: list[str] | None = None) -> pd.DataFrame:

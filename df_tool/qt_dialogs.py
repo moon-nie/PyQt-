@@ -12,10 +12,16 @@ from PyQt6.QtWidgets import (
     QHBoxLayout,
     QLabel,
     QLineEdit,
+    QListWidget,
+    QListWidgetItem,
     QMessageBox,
     QPlainTextEdit,
     QPushButton,
     QCheckBox,
+    QAbstractItemView,
+    QTabWidget,
+    QTableWidget,
+    QTableWidgetItem,
     QVBoxLayout,
     QWidget,
 )
@@ -389,6 +395,221 @@ def qt_select_column_dialog(
         return None
     value = combo.currentText().strip()
     return value or None
+
+
+def qt_select_columns_dialog(
+    parent: QWidget | None,
+    title: str,
+    label: str,
+    columns: list[str],
+    *,
+    preselect: list[str] | None = None,
+    confirm_text: str = "확인",
+    min_count: int = 1,
+) -> list[str] | None:
+    """여러 열을 Ctrl/Shift로 다중 선택. 선택 목록을 반환합니다."""
+    if not columns:
+        return None
+    dlg = QDialog(parent)
+    dlg.setWindowTitle(title)
+    dlg.setModal(True)
+    dlg.setMinimumWidth(460)
+    dlg.resize(480, 420)
+    root = QVBoxLayout(dlg)
+    hint = QLabel(label)
+    hint.setWordWrap(True)
+    root.addWidget(hint)
+    tip = QLabel("Ctrl·Shift 클릭으로 여러 열을 선택할 수 있습니다.")
+    tip.setStyleSheet(f"color: {COLORS['text_muted']};")
+    root.addWidget(tip)
+
+    listing = QListWidget()
+    listing.setSelectionMode(QAbstractItemView.SelectionMode.ExtendedSelection)
+    pre = set(preselect or [])
+    for name in columns:
+        item = QListWidgetItem(str(name))
+        listing.addItem(item)
+        if str(name) in pre:
+            item.setSelected(True)
+    if not listing.selectedItems() and listing.count() > 0:
+        listing.item(0).setSelected(True)
+    root.addWidget(listing, stretch=1)
+
+    buttons = QDialogButtonBox(
+        QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel
+    )
+    ok_btn = buttons.button(QDialogButtonBox.StandardButton.Ok)
+    if ok_btn:
+        ok_btn.setText(confirm_text)
+    buttons.accepted.connect(dlg.accept)
+    buttons.rejected.connect(dlg.reject)
+    root.addWidget(buttons)
+
+    if dlg.exec() != QDialog.DialogCode.Accepted:
+        return None
+    selected = [item.text() for item in listing.selectedItems()]
+    if len(selected) < min_count:
+        QMessageBox.warning(parent, title, f"열을 최소 {min_count}개 선택하세요.")
+        return None
+    # 목록 순서로 정렬
+    order = {str(c): i for i, c in enumerate(columns)}
+    selected.sort(key=lambda x: order.get(x, 0))
+    return selected
+
+
+def _dup_report_table(report) -> QTableWidget:
+    table = QTableWidget(len(report.duplicate_counts), 2)
+    table.setHorizontalHeaderLabels(["중복 값", "횟수"])
+    table.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
+    table.setAlternatingRowColors(True)
+    table.horizontalHeader().setStretchLastSection(True)
+    for i, (value, count) in enumerate(report.duplicate_counts):
+        table.setItem(i, 0, QTableWidgetItem(value))
+        table.setItem(i, 1, QTableWidgetItem(f"{count:,}"))
+    return table
+
+
+def qt_duplicate_report_dialog(parent: QWidget | None, report) -> bool:
+    """단일 열 값 중복 리포트. True면 표에서 해당 행만 표시."""
+    cols = qt_duplicate_reports_dialog(parent, [report])
+    return bool(cols)
+
+
+def qt_duplicate_reports_dialog(parent: QWidget | None, reports) -> list[str] | None:
+    """열별 값 중복 리포트. 표시할 열 이름 목록을 반환 (닫기면 None).
+
+    ``reports``: ``operations.DuplicateReport`` 시퀀스 (열마다 1개).
+    """
+    reports = list(reports)
+    if not reports:
+        return None
+
+    dlg = QDialog(parent)
+    names = [r.column for r in reports]
+    title = "값 중복 찾기" if len(names) == 1 else f"값 중복 찾기 — {len(names)}개 열"
+    dlg.setWindowTitle(title)
+    dlg.setModal(True)
+    dlg.resize(620, 520)
+    layout = QVBoxLayout(dlg)
+
+    lines: list[str] = []
+    any_dup = False
+    for report in reports:
+        col = report.column
+        if report.duplicate_value_count == 0:
+            lines.append(
+                f"· '{col}': 중복 없음 "
+                f"(고유 {report.unique_count:,} / 전체 {report.total_rows:,}"
+                f" · 결측 {report.null_count:,})"
+            )
+        else:
+            any_dup = True
+            lines.append(
+                f"· '{col}': 중복 있음 — 중복 값 {report.duplicate_value_count:,}개"
+                f" · 해당 행 {report.duplicate_row_count:,}행 "
+                f"(고유 {report.unique_count:,} / 전체 {report.total_rows:,}"
+                f" · 결측 {report.null_count:,})"
+            )
+    overview = QLabel(
+        "선택한 열을 각각 검사한 결과입니다. (열 조합이 아닙니다)\n\n"
+        + "\n".join(lines)
+        + "\n\n※ 모든 열이 똑같은 행을 지우려면 [완전동일 행 제거]를 쓰세요."
+    )
+    overview.setWordWrap(True)
+    layout.addWidget(overview)
+
+    result_cols: list[str] = []
+
+    if not any_dup:
+        ok = QLabel("선택한 모든 열에서 값 중복이 없습니다.")
+        ok.setStyleSheet(f"color: {COLORS['success']};")
+        layout.addWidget(ok)
+        buttons = QDialogButtonBox(QDialogButtonBox.StandardButton.Close)
+        close_btn = buttons.button(QDialogButtonBox.StandardButton.Close)
+        if close_btn:
+            close_btn.clicked.connect(dlg.reject)
+        layout.addWidget(buttons)
+        dlg.exec()
+        return None
+
+    hint = QLabel(
+        "아래 탭에서 열별 중복 값을 확인하세요. "
+        "표에 좁혀 볼 열을 고른 뒤 [표시] 버튼을 누르세요."
+    )
+    hint.setWordWrap(True)
+    hint.setStyleSheet(f"color: {COLORS['text_secondary']};")
+    layout.addWidget(hint)
+
+    tabs = QTabWidget()
+    for report in reports:
+        page = QWidget()
+        page_layout = QVBoxLayout(page)
+        page_layout.setContentsMargins(4, 8, 4, 4)
+        if report.duplicate_value_count == 0:
+            empty = QLabel(f"'{report.column}'에는 중복 값이 없습니다.")
+            empty.setStyleSheet(f"color: {COLORS['success']};")
+            page_layout.addWidget(empty)
+        else:
+            page_layout.addWidget(_dup_report_table(report), stretch=1)
+            if report.duplicate_value_count > len(report.duplicate_counts):
+                more = QLabel(
+                    f"… 외 {report.duplicate_value_count - len(report.duplicate_counts):,}개 "
+                    "(목록은 상위만 표시)"
+                )
+                more.setStyleSheet(f"color: {COLORS['text_muted']};")
+                page_layout.addWidget(more)
+        badge = "중복" if report.duplicate_value_count else "없음"
+        tabs.addTab(page, f"{report.column} ({badge})")
+    layout.addWidget(tabs, stretch=1)
+
+    buttons = QDialogButtonBox()
+    if len(reports) == 1:
+        show_btn = buttons.addButton("이 행만 표에 표시", QDialogButtonBox.ButtonRole.AcceptRole)
+
+        def _show_one() -> None:
+            nonlocal result_cols
+            result_cols = [reports[0].column]
+            dlg.accept()
+
+        show_btn.clicked.connect(_show_one)
+    else:
+        show_all = buttons.addButton(
+            "중복 있는 열 전부 표시", QDialogButtonBox.ButtonRole.AcceptRole
+        )
+        show_tab = buttons.addButton(
+            "현재 탭만 표시", QDialogButtonBox.ButtonRole.ActionRole
+        )
+
+        def _show_all() -> None:
+            nonlocal result_cols
+            result_cols = [r.column for r in reports if r.duplicate_value_count > 0]
+            dlg.accept()
+
+        def _show_tab() -> None:
+            nonlocal result_cols
+            idx = tabs.currentIndex()
+            if 0 <= idx < len(reports):
+                report = reports[idx]
+                if report.duplicate_value_count == 0:
+                    QMessageBox.information(
+                        dlg,
+                        "값 중복 찾기",
+                        f"'{report.column}'에는 표시할 중복 행이 없습니다.",
+                    )
+                    return
+                result_cols = [report.column]
+                dlg.accept()
+
+        show_all.clicked.connect(_show_all)
+        show_tab.clicked.connect(_show_tab)
+
+    close_btn = buttons.addButton("닫기", QDialogButtonBox.ButtonRole.RejectRole)
+    close_btn.clicked.connect(dlg.reject)
+    layout.addWidget(buttons)
+
+    if dlg.exec() != QDialog.DialogCode.Accepted or not result_cols:
+        return None
+    return result_cols
 
 
 def qt_find_replace_dialog(

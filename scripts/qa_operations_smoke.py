@@ -10,6 +10,9 @@ from df_tool.operations import (
     count_nulls,
     delete_columns,
     duplicate_column,
+    duplicate_row_mask,
+    duplicate_value_report,
+    duplicate_value_reports,
     fill_na,
     find_replace,
     merge_columns,
@@ -130,6 +133,29 @@ def main() -> int:
     assert list(extracted.index) == [0, 2]
     assert extracted["city"].tolist() == ["서울", "서울"]
     assert extract_rows(src, []).empty and list(extract_rows(src, []).columns) == ["city", "n"]
+
+    # duplicate_value_report / reports / mask — 열별 검사 (조합 키 아님)
+    dup_df = pd.DataFrame({"id": [1, 2, 2, 3, 3, 3, None], "x": list("abcdefg")})
+    report = duplicate_value_report(dup_df, "id")
+    assert report.total_rows == 7 and report.unique_count == 3
+    assert report.null_count == 1
+    assert report.duplicate_value_count == 2 and report.duplicate_row_count == 5
+    assert ("3", 3) in report.duplicate_counts or ("3.0", 3) in report.duplicate_counts
+    assert int(duplicate_row_mask(dup_df, "id").sum()) == 5
+    multi = pd.DataFrame(
+        {
+            "id": [1, 1, 2, 3],
+            "email": ["a@x", "b@x", "a@x", "c@x"],
+        }
+    )
+    reports = duplicate_value_reports(multi, ["id", "email"])
+    assert len(reports) == 2
+    assert reports[0].column == "id" and reports[0].duplicate_value_count == 1
+    assert reports[0].duplicate_row_count == 2
+    assert reports[1].column == "email" and reports[1].duplicate_value_count == 1
+    assert reports[1].duplicate_row_count == 2
+    # 여러 열 mask = 열별 중복의 합집합 (id 중복 행 0,1 + email 중복 행 0,2)
+    assert int(duplicate_row_mask(multi, ["id", "email"]).sum()) == 3
 
     print("qa_operations_smoke: OK")
     return 0

@@ -47,7 +47,7 @@
 | L1 | (latent) >10,000열 윈도우 이동 UI 부재 | 📝 기록 | — | 낮음 | — |
 | 17 | Mac·크로스플랫폼 UI 폰트 SSOT (`ui_fonts.py`) | ✅ 완료 | 낮음 | 높음 | 낮음 |
 | C1 | 크롤링: 앱 내 로그인 브라우저(Qt WebEngine) | ✅ 완료 | 보통 | 높음 | 보통 |
-| C2 | 크롤링: 규칙(프리셋) 저장·불러오기 | ⏳ 대기 | 낮음 | 보통 | 보통 |
+| C2 | 크롤링: 규칙(프리셋) 저장·불러오기 | ✅ 완료 | 낮음 | 보통 | 보통 |
 | C3 | 크롤링: JS 렌더 페이지(동적 HTML) 지원 | ✅ 완료 | 보통 | 높음 | 보통 |
 
 범례: ✅ 완료 · 🔄 진행 중 · ⏳ 대기 · 📝 기록(관찰)
@@ -196,10 +196,10 @@
 - ✅ `PyQt6-WebEngine` + `analysis_deps.webengine_available` / `qt_dependency` 게이트.
 - ✅ 세션 경로 `~/.gridloom/webengine/`.
 
-### C2 — 크롤링 규칙(프리셋) 저장·불러오기 ⏳
-- URL·selector·필드 매핑을 `~/.gridloom/`에 저장/불러오기.
-
----
+### C2 — 크롤링 규칙(프리셋) 저장·불러오기 ✅
+- ✅ `df_tool/crawl_presets.py` — `~/.gridloom/crawl_presets.json` SSOT (PyQt 없음).
+- ✅ 크롤 패널: 프리셋 콤보 · 불러오기 · 현재 저장 · 삭제.
+- ✅ 브라우저 일괄 취소: `cancel_pending`이 큐·WebEngine fetch·poller를 함께 중단.
 
 ## 5. 진행 방식
 

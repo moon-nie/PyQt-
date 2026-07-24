@@ -294,6 +294,7 @@ class MainWindow(QMainWindow):
             get_dataframe=lambda: self._loaded.dataframe if self._loaded else None,
             on_apply=self._apply_analysis_result,
             on_log=self._log_action,
+            get_source_path=lambda: self._loaded.path if self._loaded else None,
         )
         self._stack.addWidget(self.analysis_panel)
 
@@ -919,14 +920,25 @@ class MainWindow(QMainWindow):
     def drop_duplicates(self) -> None:
         if not self._require_data() or self._loaded is None:
             return
+        from df_tool.qt_dialogs import qt_confirm
+
         before = len(self._loaded.dataframe)
+        if not qt_confirm(
+            self,
+            "완전동일 행 제거",
+            f"현재 {before:,}행입니다.\n\n"
+            "모든 열 값이 완전히 같은 행을 하나만 남기고 나머지를 삭제합니다.\n"
+            "(특정 열 값만 겹치는 행을 보려면 [값 중복 찾기]를 쓰세요.)\n\n"
+            "계속할까요?",
+        ):
+            return
         df = drop_duplicates(self._loaded.dataframe)
         removed = before - len(df)
         if removed == 0:
-            self._set_status("중복 행 없음 — 데이터 변경 없음")
-            self._log_action("info", "중복 행 없음", "변경된 데이터가 없습니다.")
+            self._set_status("완전동일 행 없음 — 데이터 변경 없음")
+            self._log_action("info", "완전동일 행 없음", "변경된 데이터가 없습니다.")
             return
-        self._apply_dataframe(df, message=f"중복 {removed:,}행 제거")
+        self._apply_dataframe(df, message=f"완전동일 행 {removed:,}개 제거")
 
     def fill_missing_values(self) -> None:
         """결측이 있는 열을 고른 뒤 채우기."""
@@ -1003,7 +1015,18 @@ class MainWindow(QMainWindow):
     def drop_na_rows(self) -> None:
         if not self._require_data() or self._loaded is None:
             return
+        from df_tool.qt_dialogs import qt_confirm
+
         before = len(self._loaded.dataframe)
+        if not qt_confirm(
+            self,
+            "결측 행 제거",
+            f"현재 {before:,}행입니다.\n\n"
+            "빈 칸(결측)이 하나라도 있는 행을 통째로 삭제합니다.\n"
+            "열만 골라 빈 칸을 채우려면 [결측 채우기]를 쓰세요.\n\n"
+            "계속할까요?",
+        ):
+            return
         df = drop_na_rows(self._loaded.dataframe)
         removed = before - len(df)
         if removed == 0:

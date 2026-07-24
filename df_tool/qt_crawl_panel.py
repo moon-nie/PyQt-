@@ -11,6 +11,7 @@ from PyQt6.QtWidgets import (
     QFileDialog,
     QFormLayout,
     QHBoxLayout,
+    QInputDialog,
     QLabel,
     QLineEdit,
     QListWidget,
@@ -123,8 +124,10 @@ class CrawlPanel(QWidget):
         self._browser_rows: list[dict[str, str]] = []
         self._browser_fields = None
         self._browser_param_key = "code"
+        self._browser_gen = 0
         self._build_ui()
         self._gate_webengine_buttons()
+        self._refresh_preset_combo()
         self._refresh_merge_left_columns()
         self._on_import_mode_changed()
 
@@ -138,12 +141,30 @@ class CrawlPanel(QWidget):
         root.addWidget(title)
 
         hint = QLabel(
-            "로그인·JS 페이지: [로그인 브라우저] → [브라우저 렌더 미리보기] / [브라우저로 일괄].\n"
-            "공개 정적 HTML은 Cookie 없이 일반 미리보기로도 됩니다. 사이트 약관·robots를 지켜 주세요."
+            "로그인·JS 페이지: [로그인 브라우저] → [브라우저 렌더] / [브라우저로 일괄].\n"
+            "공개 정적 HTML은 Cookie 없이 일반 미리보기로도 됩니다. "
+            "규칙 프리셋으로 URL·selector를 저장할 수 있습니다."
         )
         hint.setWordWrap(True)
         hint.setStyleSheet(f"color: {COLORS['text_secondary']};")
         root.addWidget(hint)
+
+        preset_row = QHBoxLayout()
+        preset_row.addWidget(QLabel("규칙 프리셋"))
+        self.preset_combo = QComboBox()
+        self.preset_combo.setMinimumWidth(180)
+        self.preset_combo.setToolTip("저장해 둔 크롤 규칙(URL·selector·일괄 설정)")
+        preset_row.addWidget(self.preset_combo, stretch=1)
+        self.preset_load_btn = QPushButton("불러오기")
+        self.preset_load_btn.clicked.connect(self._load_selected_preset)
+        preset_row.addWidget(self.preset_load_btn)
+        self.preset_save_btn = QPushButton("현재 저장…")
+        self.preset_save_btn.clicked.connect(self._save_current_preset)
+        preset_row.addWidget(self.preset_save_btn)
+        self.preset_delete_btn = QPushButton("삭제")
+        self.preset_delete_btn.clicked.connect(self._delete_selected_preset)
+        preset_row.addWidget(self.preset_delete_btn)
+        root.addLayout(preset_row)
 
         cookie_row = QHBoxLayout()
         cookie_row.addWidget(QLabel("Cookie(선택)"))
@@ -189,6 +210,11 @@ class CrawlPanel(QWidget):
         self.import_btn.clicked.connect(self._run_import)
         self.import_btn.setEnabled(False)
         btn_row.addWidget(self.import_btn)
+        self.cancel_btn = QPushButton("작업 취소")
+        self.cancel_btn.setToolTip("진행 중인 스캔·미리보기·일괄·브라우저 렌더를 중단합니다.")
+        self.cancel_btn.clicked.connect(self.cancel_pending)
+        self.cancel_btn.setEnabled(False)
+        btn_row.addWidget(self.cancel_btn)
         btn_row.addStretch()
         self.status_label = QLabel("준비")
         self.status_label.setStyleSheet(f"color: {COLORS['text_muted']};")
@@ -443,11 +469,121 @@ class CrawlPanel(QWidget):
         self.merge_left_col.setEnabled(merge and self.merge_left_col.count() > 0)
 
     def cancel_pending(self) -> None:
+        """스캔·HTTP 일괄·브라우저 렌더/일괄을 모두 중단하고 busy를 해제합니다."""
+        self._browser_gen += 1
+        self._browser_queue.clear()
         self._poller.cancel()
+        if self._we_fetcher is not None:
+            self._we_fetcher.cancel()
+        self._set_busy(False, "취소됨")
+        if self.on_log:
+            self.on_log("info", "크롤링 작업 취소", None)
 
     def shutdown(self) -> None:
         self.cancel_pending()
         self._executor.shutdown(wait=False, cancel_futures=True)
+
+    def _refresh_preset_combo(self) -> None:
+        from df_tool.crawl_presets import load_presets
+
+        current = self.preset_combo.currentText() if hasattr(self, "preset_combo") else ""
+        self.preset_combo.blockSignals(True)
+        self.preset_combo.clear()
+        self.preset_combo.addItem("(프리셋 선택)", "")
+        for preset in load_presets():
+            self.preset_combo.addItem(preset.name, preset.name)
+        idx = self.preset_combo.findText(current)
+        if idx >= 0:
+            self.preset_combo.setCurrentIndex(idx)
+        self.preset_combo.blockSignals(False)
+
+    def _collect_preset_from_ui(self, name: str):
+        from df_tool.crawl_presets import CrawlPreset
+
+        return CrawlPreset(
+            name=name.strip(),
+            url=self.url_edit.text().strip(),
+            selector=self.selector_edit.text().strip(),
+            attr=self.attr_combo.currentText().strip() or "text",
+            limit=int(self.limit_spin.value()),
+            column=self.column_edit.text().strip() or "value",
+            batch_template=self.batch_template.text().strip(),
+            batch_param_key=self.batch_param_key.text().strip() or "code",
+            batch_fields=self.batch_fields.toPlainText(),
+            batch_delay_ms=int(self.batch_delay.value()),
+            batch_max=int(self.batch_max.value()),
+            batch_params=self.batch_params.toPlainText(),
+        )
+
+    def _apply_preset_to_ui(self, preset) -> None:
+        self.url_edit.setText(preset.url)
+        self.selector_edit.setText(preset.selector)
+        idx = self.attr_combo.findText(preset.attr)
+        if idx >= 0:
+            self.attr_combo.setCurrentIndex(idx)
+        self.limit_spin.setValue(max(1, int(preset.limit)))
+        self.column_edit.setText(preset.column or "value")
+        self.batch_template.setText(preset.batch_template)
+        self.batch_param_key.setText(preset.batch_param_key or "code")
+        self.batch_fields.setPlainText(preset.batch_fields)
+        self.batch_delay.setValue(max(0, int(preset.batch_delay_ms)))
+        self.batch_max.setValue(max(1, int(preset.batch_max)))
+        if preset.batch_params.strip():
+            self.batch_params.setPlainText(preset.batch_params)
+            self.param_source.setCurrentIndex(self.param_source.findData("manual"))
+
+    def _save_current_preset(self) -> None:
+        from df_tool.crawl_presets import upsert_preset
+
+        name, ok = QInputDialog.getText(self, "규칙 프리셋 저장", "프리셋 이름:")
+        if not ok:
+            return
+        name = (name or "").strip()
+        if not name:
+            QMessageBox.warning(self, "규칙 프리셋", "이름을 입력하세요.")
+            return
+        preset = self._collect_preset_from_ui(name)
+        upsert_preset(preset)
+        self._refresh_preset_combo()
+        idx = self.preset_combo.findData(name)
+        if idx >= 0:
+            self.preset_combo.setCurrentIndex(idx)
+        self.status_label.setText(f"프리셋 저장: {name}")
+        if self.on_log:
+            self.on_log("success", "크롤 프리셋 저장", name)
+
+    def _load_selected_preset(self) -> None:
+        from df_tool.crawl_presets import load_presets
+
+        name = self.preset_combo.currentData()
+        if not name:
+            QMessageBox.information(self, "규칙 프리셋", "불러올 프리셋을 선택하세요.")
+            return
+        match = next((p for p in load_presets() if p.name == name), None)
+        if match is None:
+            QMessageBox.warning(self, "규칙 프리셋", "선택한 프리셋을 찾지 못했습니다.")
+            self._refresh_preset_combo()
+            return
+        self._apply_preset_to_ui(match)
+        self.status_label.setText(f"프리셋 불러옴: {name}")
+        if self.on_log:
+            self.on_log("info", "크롤 프리셋 불러오기", name)
+
+    def _delete_selected_preset(self) -> None:
+        from df_tool.crawl_presets import delete_preset
+
+        name = self.preset_combo.currentData()
+        if not name:
+            QMessageBox.information(self, "규칙 프리셋", "삭제할 프리셋을 선택하세요.")
+            return
+        if (
+            QMessageBox.question(self, "규칙 프리셋 삭제", f"'{name}' 프리셋을 삭제할까요?")
+            != QMessageBox.StandardButton.Yes
+        ):
+            return
+        delete_preset(name)
+        self._refresh_preset_combo()
+        self.status_label.setText(f"프리셋 삭제: {name}")
 
     def _show_cookie_help(self) -> None:
         QMessageBox.information(self, "Cookie 사용법", _COOKIE_HELP)
@@ -587,8 +723,13 @@ class CrawlPanel(QWidget):
             self.render_preview_btn,
             self.batch_run_btn,
             self.batch_browser_btn,
+            self.preset_load_btn,
+            self.preset_save_btn,
+            self.preset_delete_btn,
         ):
             btn.setEnabled(not busy)
+        if hasattr(self, "cancel_btn"):
+            self.cancel_btn.setEnabled(busy)
         if not busy:
             self._gate_webengine_buttons()
         self.login_browser_btn.setEnabled(True)
@@ -844,10 +985,14 @@ class CrawlPanel(QWidget):
         self._browser_rows = []
         self._browser_fields = fields
         self._browser_param_key = param_key
+        self._browser_gen += 1
+        gen = self._browser_gen
         self._set_busy(True, f"브라우저 일괄 0/{len(queue)}…")
-        self._advance_browser_batch()
+        self._advance_browser_batch(gen)
 
-    def _advance_browser_batch(self) -> None:
+    def _advance_browser_batch(self, gen: int) -> None:
+        if gen != self._browser_gen:
+            return
         assert self._we_fetcher is not None
         total = len(self._browser_rows) + len(self._browser_queue)
         if not self._browser_queue:
@@ -865,6 +1010,8 @@ class CrawlPanel(QWidget):
         fields = self._browser_fields or []
 
         def on_html(html: str | None, error: str | None) -> None:
+            if gen != self._browser_gen:
+                return
             row: dict[str, str] = {key: value, "url": url}
             if error or html is None:
                 for field in fields:
@@ -879,16 +1026,18 @@ class CrawlPanel(QWidget):
                         row.setdefault(field.name, "")
                     row["error"] = str(exc)
             self._browser_rows.append(row)
-            self._advance_browser_batch()
+            self._advance_browser_batch(gen)
 
         try:
             self._we_fetcher.fetch(url, settle_ms=_BROWSER_SETTLE_MS, callback=on_html)
         except Exception as exc:
+            if gen != self._browser_gen:
+                return
             row = {key: value, "url": url, "error": str(exc)}
             for field in fields:
                 row[field.name] = ""
             self._browser_rows.append(row)
-            self._advance_browser_batch()
+            self._advance_browser_batch(gen)
 
     def _run_import(self) -> None:
         if self._preview_df is None or self._preview_df.empty:

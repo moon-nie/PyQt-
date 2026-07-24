@@ -163,10 +163,10 @@ GridHorizontalHeader (grid/header.py)
   → _apply_df(..., restructure=True)
 ```
 
-### 예시 C: 중복 제거 버튼
+### 예시 C: 완전동일 행 제거 버튼
 
 ```
-qt_viewer 툴바 버튼
+qt_viewer 툴바 [완전동일 행 제거]
   → on_drop_duplicates (qt_app에 연결)
   → operations.drop_duplicates
   → viewer.set_dataframe / _apply_dataframe

@@ -31,6 +31,7 @@ Gridloom/
     ├── operations.py         ★ pandas SSOT (UI import 금지)
     ├── window_state.py       창 위치·크기 (window.json)
     ├── crawl.py              정적 HTML CSS selector 크롤링
+    ├── crawl_presets.py      크롤 규칙 프리셋 JSON (PyQt 없음)
     ├── qt_webengine_crawl.py 로그인 브라우저 · JS 렌더 HTML
     ├── loader.py             파일 I/O
     ├── selection.py          SelectionScope
@@ -54,7 +55,8 @@ Gridloom/
 | `operations.py` | 주방 — pandas 변환만 (`extract_rows` 등) |
 | `window_state.py` | 창 위치·크기 JSON 저장/복원 (PyQt 없음) |
 | `crawl.py` | 정적 HTML 크롤링 (PyQt 없음) |
-| `qt_webengine_crawl.py` | 로그인 브라우저 · 렌더 HTML (WebEngine) |
+| `crawl_presets.py` | 크롤 규칙 프리셋 저장/불러오기 |
+| `qt_webengine_crawl.py` | 로그인 브라우저 · 렌더 HTML (WebEngine) · `cancel()` |
 | `qt_crawl_panel.py` | 크롤링 탭 UI |
 | `qt_dialogs.py` | PyQt 공통 팝업 (확인·저장·도움말·열 병합/분리 등 공통 폼) |
 | `qt_data_dialogs.py` | VLOOKUP·조인·병합·결측채우기·그룹 팝업 |
@@ -85,7 +87,8 @@ gridloom.pyw
 | `qt_analysis_worker.py` | KNN·이상치 등 무거운 작업을 메인 스레드 밖에서 실행 |
 | `analysis_deps.py` | matplotlib/sklearn/scipy 설치 여부 |
 | `chart_style.py` | 차트 색·글자·격자 설정 (`~/.gridloom/chart_style.json`) |
-| `eda_report.py` | `build_eda_html(df)` — HTML 리포트 문자열 |
+| `eda_report.py` | `build_eda_html(df, title=..., source_name=...)` · `default_eda_report_filename(path)` |
+| `analysis_help.py` | 분석 용어 툴팁 문구 SSOT (`tip_text`) · `qt_help_tip.help_tip_badge`로 표시 |
 
 - 가공 중 데이터 변경 시 `qt_app.py`는 `refresh_light()`만 호출하고, 분석 페이지일 때만 `refresh(charts=True)` 합니다.
 - 차트 색 변경은 `ChartStyle` + `MplCanvas.style_axes` 경유. 리포트는 `eda_report.py`에 pandas만 사용.
@@ -97,7 +100,7 @@ gridloom.pyw
 
 ### 유형 A — 데이터만 바꾸는 기능 (버튼·메뉴)
 
-**예:** 중복 제거, 결측 행 제거, 정렬
+**예:** 완전동일 행 제거, 결측 행 제거, 정렬
 
 1. `operations.py`에 함수 추가
 2. `qt_app.py`에서 viewer 콜백 연결 (`on_drop_duplicates` 등)
